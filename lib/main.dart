@@ -141,7 +141,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           // Bottom right medium grey circle
           Positioned(
             right: -55,
-            bottom: 275,
+            bottom: 265,
             child: Container(
               width: 280,
               height: 280,
@@ -161,7 +161,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           // Bottom right small grey circle
           Positioned(
             right: 170,
-            bottom: 275,
+            bottom: 265,
             child: Container(
               width: 140,
               height: 140,
