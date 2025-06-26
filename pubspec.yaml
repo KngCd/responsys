@@ -10,6 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
   google_fonts: ^6.2.1
+  webview_flutter: ^4.2.2
+  webview_flutter_android: ^3.10.0
+  webview_flutter_wkwebview: ^3.10.0
+  flutter_inappwebview: ^6.0.0
+  permission_handler: ^12.0.0+1
 
 dev_dependencies:
   flutter_test:
@@ -20,3 +25,13 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/logo.png
+    - assets/images/map_placeholder.png
+    - assets/images/hazard_map.png
+    - assets/images/legend.png
+    - assets/qgis_map/
+    - assets/qgis_map/css/
+    - assets/qgis_map/js/
+    - assets/qgis_map/images/
+    - assets/qgis_map/data/
+    - assets/qgis_map/legend/
+    - assets/qgis_map/webfonts/

@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
+import 'incident_map.dart';
+import 'local_server.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await LocalServer.start(); // Start server once
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -17,12 +21,14 @@ class MyApp extends StatelessWidget {
         textTheme: GoogleFonts.montserratTextTheme(),
       ),
       home: const OnboardingScreen(),
+      // home: const QgisMapScreen(),
     );
   }
 }
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
+
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
@@ -32,14 +38,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _currentPage = 0;
   bool _showLogo = true;
 
+  bool _showClose = false;
+
   @override
   void initState() {
     super.initState();
-    // Show logo for 1.5 seconds, then go to onboarding
+
     Future.delayed(const Duration(milliseconds: 1500), () {
       setState(() {
         _showLogo = false;
         _currentPage = 0;
+      });
+
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (mounted) {
+          setState(() {
+            _showClose = true;
+          });
+        }
       });
     });
   }
@@ -88,14 +104,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
 
     // Onboarding pages
-      final List<Widget> pages = [
+    final List<Widget> pages = [
       // 1. Welcome Page (with circles)
       Stack(
         children: [
           // Top left large blue circle (mostly off-screen)
-          Positioned(
+          Positioned( 
             left: -100,
-            top: -120,
+            top: -100,
             child: Container(
               width: 300,
               height: 300,
@@ -115,7 +131,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           // Top right medium grey circle (partially offscreen)
           Positioned(
             left: 130,
-            top: -100,
+            top: -80,
             child: Container(
               width: 170,
               height: 170,
@@ -141,7 +157,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           // Bottom right medium grey circle
           Positioned(
             right: -55,
-            bottom: 250,
+            bottom: 340,
             child: Container(
               width: 280,
               height: 280,
@@ -161,7 +177,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           // Bottom right small grey circle
           Positioned(
             right: 170,
-            bottom: 250,
+            bottom: 320,
             child: Container(
               width: 140,
               height: 140,
@@ -172,11 +188,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
           // Close icon
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Icon(Icons.close, color: Colors.grey[700]),
-          ),
+          if (_showClose)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const QgisMapScreen(),
+                    ),
+                  );
+                },
+                child: Icon(Icons.close, color: Colors.grey[700], size: 28),
+              ),
+            ),
+
           // Text
           Align(
             alignment: Alignment.bottomCenter,
@@ -185,7 +213,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Gradient text: Welcome to\nResponsys
+                  // Gradient text
                   ShaderMask(
                     shaderCallback: (bounds) =>
                         const LinearGradient(
@@ -241,10 +269,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // 2. Report Incidents
       Stack(
         children: [
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Icon(Icons.close, color: Colors.grey[700]),
+          if (_showClose)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const QgisMapScreen(),
+                    ),
+                  );
+                },
+                child: Icon(Icons.close, color: Colors.grey[700], size: 28),
+              ),
           ),
           Align(
             alignment: Alignment.bottomCenter,
@@ -309,10 +348,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // 3. Real Time Report Collection
       Stack(
         children: [
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Icon(Icons.close, color: Colors.grey[700]),
+          if (_showClose)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const QgisMapScreen(),
+                    ),
+                  );
+                },
+                child: Icon(Icons.close, color: Colors.grey[700], size: 28),
+              ),
           ),
           Align(
             alignment: Alignment.bottomCenter,
@@ -377,10 +427,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // 4. Stay Informed, Stay Alert, Stay Safe
       Stack(
         children: [
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Icon(Icons.close, color: Colors.grey[700]),
+          if (_showClose)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const QgisMapScreen(),
+                    ),
+                  );
+                },
+                child: Icon(Icons.close, color: Colors.grey[700], size: 28),
+              ),
           ),
           Align(
             alignment: Alignment.bottomCenter,
@@ -446,23 +507,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          PageView.builder(
-            controller: _controller,
-            itemCount: pages.length,
-            onPageChanged: _onPageChanged,
-            itemBuilder: (context, index) => pages[index],
-            physics: const BouncingScrollPhysics(),
-          ),
-          // Page indicator
-          Positioned(
-            bottom: 32,
-            left: 0,
-            right: 0,
-            child: _buildIndicator(pages.length, _currentPage),
-          ),
-        ],
+      body: SafeArea(
+        child: Stack(
+          children: [
+            RefreshIndicator(
+              onRefresh: () async {
+                // You can reset your onboarding state here, or reload data
+                setState(() {
+                  _currentPage = 0;
+                  _showLogo = true;
+                  _showClose = false;
+                });
+                // Optionally, you can add a delay to show the spinner
+                await Future.delayed(const Duration(milliseconds: 1200));
+                // Re-run your onboarding logic if needed
+                initState();
+              },
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: pages.length,
+                onPageChanged: _onPageChanged,
+                itemBuilder: (context, index) => pages[index],
+                physics: const BouncingScrollPhysics(),
+              ),
+            ),
+            // Page indicator
+            Positioned(
+              bottom: 32,
+              left: 0,
+              right: 0,
+              child: _buildIndicator(pages.length, _currentPage),
+            ),
+          ],
+        ),
       ),
     );
   }
