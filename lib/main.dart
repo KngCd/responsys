@@ -213,24 +213,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Gradient text
                   ShaderMask(
-                    shaderCallback: (bounds) =>
-                        const LinearGradient(
-                          colors: [Color(0xFF0D001B), Color(0xFF222964)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ).createShader(
-                          Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-                        ),
+                    shaderCallback: (bounds) {
+                      return const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0xFF00084D), // Top (deep navy)
+                          Color(0xFF293699), // Bottom (desaturated blue)
+                        ],
+                      ).createShader(
+                        Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+                      );
+                    },
                     blendMode: BlendMode.srcIn,
                     child: Text(
                       "Welcome to\nResponsys",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 40,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
                         height: 1.3,
                       ),
                     ),
@@ -268,86 +270,140 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
       // 2. Report Incidents
       Stack(
-        children: [
-          if (_showClose)
-            Positioned(
-              top: 16,
-              right: 16,
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const QgisMapScreen(),
-                    ),
-                  );
-                },
-                child: Icon(Icons.close, color: Colors.grey[700], size: 28),
-              ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 80),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Gradient text
-                  ShaderMask(
-                    shaderCallback: (bounds) =>
-                        const LinearGradient(
-                          colors: [Color(0xFF0D001B), Color(0xFF222964)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ).createShader(
-                          Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-                        ),
-                    blendMode: BlendMode.srcIn,
-                    child: Text(
-                      "Report\nIncidents",
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.montserrat(
-                        fontSize: 40,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Gradient text: Padre Garcia
-                  ShaderMask(
-                    shaderCallback: (bounds) =>
-                        const LinearGradient(
-                          colors: [Color(0xFF0D001B), Color(0xFF222964)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ).createShader(
-                          Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-                        ),
-                    blendMode: BlendMode.srcIn,
-                    child: Text(
-                      "Incidents located in Padre Garcia can be reported\nto the MDRRMO using this app",
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.montserrat(
-                        fontSize: 17,
-                        fontWeight:
-                            FontWeight.w200, // lighter than headline, readable
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
+          children: [
+            // Full image (no cropping)
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/1.png',
+                fit: BoxFit.cover,
               ),
             ),
-          ),
-        ],
-      ),
+
+            // Fade-to-white gradient at the bottom of the image
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color.fromARGB(80, 255, 255, 255), // opacity white
+                      Color.fromARGB(217, 255, 255, 255), // ~85% opacity white
+                      Colors.white,
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: [0.3, 0.65, 1.0], // Fade only lower portion
+                  ),
+                ),
+              ),
+            ),
+
+            // Close button
+            if (_showClose)
+              Positioned(
+                top: 16,
+                right: 16,
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const QgisMapScreen(),
+                      ),
+                    );
+                  },
+                  child: Icon(Icons.close, color: Colors.grey[700], size: 28),
+                ),
+              ),
+
+            // Content at bottom
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 80),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Gradient title
+                    ShaderMask(
+                      shaderCallback: (bounds) {
+                        return const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0xFF00084D),
+                            Color(0xFF293699),
+                          ],
+                        ).createShader(
+                          Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+                        );
+                      },
+                      blendMode: BlendMode.srcIn,
+                      child: Text(
+                        "Report\nIncidents",
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.montserrat(
+                          fontSize: 40,
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // Description text with gradient fill
+                    ShaderMask(
+                      shaderCallback: (bounds) =>
+                          const LinearGradient(
+                            colors: [Color(0xFF0D001B), Color(0xFF222964)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ).createShader(
+                            Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+                          ),
+                      blendMode: BlendMode.srcIn,
+                      child: Text(
+                        "Incidents located in Padre Garcia can be reported\nto the MDRRMO using this app",
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.montserrat(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w200,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       // 3. Real Time Report Collection
       Stack(
         children: [
+          // Full image (no cropping)
+          Positioned.fill(
+            child: Image.asset('assets/images/2.png', fit: BoxFit.cover),
+          ),
+
+          // Fade-to-white gradient at the bottom of the image
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color.fromARGB(80, 255, 255, 255), // opacity white
+                    Color.fromARGB(217, 255, 255, 255), // ~85% opacity white
+                    Colors.white,
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: [0.3, 0.65, 1.0], // Fade only lower portion
+                ),
+              ),
+            ),
+          ),
+
+          // Close button
           if (_showClose)
             Positioned(
               top: 16,
@@ -363,7 +419,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
                 child: Icon(Icons.close, color: Colors.grey[700], size: 28),
               ),
-          ),
+            ),
+
+          // Content at bottom
           Align(
             alignment: Alignment.bottomCenter,
             child: Padding(
@@ -371,24 +429,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Gradient text
+                  // Gradient title
                   ShaderMask(
-                    shaderCallback: (bounds) =>
-                        const LinearGradient(
-                          colors: [Color(0xFF0D001B), Color(0xFF222964)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ).createShader(
-                          Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-                        ),
+                    shaderCallback: (bounds) {
+                      return const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFF00084D), Color(0xFF293699)],
+                      ).createShader(
+                        Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+                      );
+                    },
                     blendMode: BlendMode.srcIn,
                     child: Text(
                       "Realtime\nReport\nCollection",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 40,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
                         height: 1.3,
                       ),
                     ),
@@ -396,7 +454,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
                   const SizedBox(height: 8),
 
-                  // Gradient text: Padre Garcia
+                  // Description text with gradient fill
                   ShaderMask(
                     shaderCallback: (bounds) =>
                         const LinearGradient(
@@ -412,9 +470,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 17,
-                        fontWeight:
-                            FontWeight.w200, // lighter than headline, readable
-                        color: Colors.white,
+                        fontWeight: FontWeight.w200,
                       ),
                     ),
                   ),
@@ -427,6 +483,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // 4. Stay Informed, Stay Alert, Stay Safe
       Stack(
         children: [
+          // Full image (no cropping)
+          Positioned.fill(
+            child: Image.asset('assets/images/3.jpg', fit: BoxFit.cover),
+          ),
+
+          // Fade-to-white gradient at the bottom of the image
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color.fromARGB(80, 255, 255, 255), // opacity white
+                    Color.fromARGB(217, 255, 255, 255), // ~85% opacity white
+                    Colors.white,
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: [0.3, 0.65, 1.0], // Fade only lower portion
+                ),
+              ),
+            ),
+          ),
+
+          // Close button
           if (_showClose)
             Positioned(
               top: 16,
@@ -442,7 +522,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
                 child: Icon(Icons.close, color: Colors.grey[700], size: 28),
               ),
-          ),
+            ),
+
+          // Content at bottom
           Align(
             alignment: Alignment.bottomCenter,
             child: Padding(
@@ -450,24 +532,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Gradient text
+                  // Gradient title
                   ShaderMask(
-                    shaderCallback: (bounds) =>
-                        const LinearGradient(
-                          colors: [Color(0xFF0D001B), Color(0xFF222964)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ).createShader(
-                          Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-                        ),
+                    shaderCallback: (bounds) {
+                      return const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFF00084D), Color(0xFF293699)],
+                      ).createShader(
+                        Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+                      );
+                    },
                     blendMode: BlendMode.srcIn,
                     child: Text(
                       "Stay Informed\nStay Alert\nStay Safe",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 40,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
                         height: 1.3,
                       ),
                     ),
@@ -475,7 +557,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
                   const SizedBox(height: 8),
 
-                  // Gradient text: Padre Garcia
+                  // Description text with gradient fill
                   ShaderMask(
                     shaderCallback: (bounds) =>
                         const LinearGradient(
@@ -491,9 +573,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 17,
-                        fontWeight:
-                            FontWeight.w200, // lighter than headline, readable
-                        color: Colors.white,
+                        fontWeight: FontWeight.w200,
                       ),
                     ),
                   ),
@@ -510,26 +590,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            RefreshIndicator(
-              onRefresh: () async {
-                // You can reset your onboarding state here, or reload data
-                setState(() {
-                  _currentPage = 0;
-                  _showLogo = true;
-                  _showClose = false;
-                });
-                // Optionally, you can add a delay to show the spinner
-                await Future.delayed(const Duration(milliseconds: 1200));
-                // Re-run your onboarding logic if needed
-                initState();
-              },
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: pages.length,
-                onPageChanged: _onPageChanged,
-                itemBuilder: (context, index) => pages[index],
-                physics: const BouncingScrollPhysics(),
-              ),
+            PageView.builder(
+              controller: _controller,
+              itemCount: pages.length,
+              onPageChanged: _onPageChanged,
+              itemBuilder: (context, index) => pages[index],
+              physics: const BouncingScrollPhysics(),
             ),
             // Page indicator
             Positioned(

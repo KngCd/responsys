@@ -1,10 +1,9 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:permission_handler/permission_handler.dart';
 // import 'package:google_fonts/google_fonts.dart';
 import 'incident_map.dart';
+import 'widgets/navbar.dart';
 
 class HazardMapScreen extends StatefulWidget {
   const HazardMapScreen({super.key});
@@ -56,11 +55,9 @@ class _HazardMapScreenState extends State<HazardMapScreen> {
         initialUrlRequest: URLRequest(
           url: WebUri("http://localhost:8080/hazards.html"),
         ),
-        initialOptions: InAppWebViewGroupOptions(
-          crossPlatform: InAppWebViewOptions(
-            javaScriptEnabled: true,
-            useShouldOverrideUrlLoading: true,
-          ),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          useShouldOverrideUrlLoading: true,
         ),
         onGeolocationPermissionsShowPrompt: (controller, origin) async {
           return GeolocationPermissionShowPromptResponse(
@@ -73,6 +70,10 @@ class _HazardMapScreenState extends State<HazardMapScreen> {
           // Handle web view creation if needed
         },
       ),
+      bottomNavigationBar: BottomNavBar(
+        current: NavPage.hazard,
+        parentContext: context,
+      )
     );
   }
 }
