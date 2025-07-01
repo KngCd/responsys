@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -19,6 +22,13 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   final server = InAppLocalhostServer(documentRoot: 'assets/qgis_map');
   InAppWebViewController? _webViewController;
   File? _capturedImage;
+  final TextEditingController _descriptionController = TextEditingController();
+  BuildContext? dialogContext;
+
+  // For editing
+  int? _editingReportId;
+  String? _existingPhotoPath;
+  String? _originalBarangay;
 
   Future<void> _openCamera(Function(File) onImagePicked) async {
     final picker = ImagePicker();
@@ -32,10 +42,77 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     }
   }
 
+  Future<void> _editIncidentReport({
+    required int reportId,
+    required double latitude,
+    required double longitude,
+    required String barangay,
+    required String description,
+    File? newPhoto,
+    String? existingPhoto,
+    required BuildContext context,
+    required InAppWebViewController? webViewController,
+  }) async {
+    final String timeNow = TimeOfDay.now().format(context); // <-- Move this up!
+    final uri = Uri.parse('http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['report_id'] = reportId.toString()
+      ..fields['latitude'] = latitude.toString()
+      ..fields['longitude'] = longitude.toString()
+      ..fields['description'] = description
+      ..fields['barangay'] = barangay;
+  
+    if (newPhoto != null) {
+      request.fields['isNewPhoto'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('photoData', newPhoto.path));
+    } else if (existingPhoto != null) {
+      request.fields['isNewPhoto'] = 'false';
+      request.fields['existingPhoto'] = existingPhoto;
+    }
+  
+    final response = await request.send();
+  
+    if (!mounted) return;
+  
+    if (response.statusCode == 200) {
+      final respStr = await response.stream.bytesToString();
+      final data = jsonDecode(respStr);
+      await saveReportLocally({
+        'id': data['report_id'],
+        'latitude': data['latitude'],
+        'longitude': data['longitude'],
+        'description': data['description'],
+        'barangay': data['barangay'],
+        'photo': data['photo'],
+        'status': 'Active',
+        'date': DateTime.now().toIso8601String(),
+        'time': timeNow, // Use the captured value
+      });
+      await sendLocalReportsToWebView();
+      webViewController?.evaluateJavascript(source: """
+        Swal.fire({
+          title: 'Success!',
+          text: 'Report updated successfully!',
+          icon: 'success',
+          confirmButtonColor: '#232A67'
+        });
+      """);
+      // webViewController?.reload();
+    } else {
+      webViewController?.evaluateJavascript(source: """
+        Swal.fire({
+          title: 'Error!',
+          text: 'Failed to update report.',
+          icon: 'error',
+          confirmButtonColor: '#d32f2f'
+        });
+      """);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    // server.start();
     _requestLocationPermission();
   }
 
@@ -43,12 +120,122 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     await Permission.location.request();
   }
 
-  // Show incident form sheet with location and barangay
+  Future<void> sendLocalReportsToWebView() async {
+    final prefs = await SharedPreferences.getInstance();
+    final reportsString = prefs.getString('citizenReports');
+    if (reportsString == null || _webViewController == null) return;
+    // Send the reports as JSON to the JS handler in your HTML
+    await _webViewController!.evaluateJavascript(
+      source: "window.setFlutterReports($reportsString);"
+    );
+  }
+
+  Future<void> saveReportLocally(Map<String, dynamic> reportData) async {
+    final prefs = await SharedPreferences.getInstance();
+    final reportsString = prefs.getString('citizenReports');
+    List reports = reportsString != null ? List<Map<String, dynamic>>.from(jsonDecode(reportsString)) : [];
+    // If editing, replace; if new, add
+    if (reportData['id'] != null) {
+      final idx = reports.indexWhere((r) => r['id'] == reportData['id']);
+      if (idx != -1) {
+        reports[idx] = reportData;
+      } else {
+        reports.add(reportData);
+      }
+    } else {
+      reports.add(reportData);
+    }
+    await prefs.setString('citizenReports', jsonEncode(reports));
+  }
+
+  Future<void> deleteReportLocally(int reportId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final reportsString = prefs.getString('citizenReports');
+    if (reportsString == null) return;
+    List reports = List<Map<String, dynamic>>.from(jsonDecode(reportsString));
+    reports.removeWhere((r) => r['id'] == reportId);
+    await prefs.setString('citizenReports', jsonEncode(reports));
+    await sendLocalReportsToWebView(); // Update the map
+  }
+
+  Future<void> _submitIncidentReport({
+    required double latitude,
+    required double longitude,
+    required String barangay,
+    required String description,
+    required File photo,
+    required BuildContext context,
+    required InAppWebViewController? webViewController,
+  }) async {
+    final uri = Uri.parse('http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['latitude'] = latitude.toString()
+      ..fields['longitude'] = longitude.toString()
+      ..fields['description'] = description
+      ..fields['barangay'] = barangay
+      ..files.add(await http.MultipartFile.fromPath('photoData', photo.path));
+
+    final response = await request.send();
+
+    if (!mounted) return;
+
+    if (response.statusCode == 200) {
+      final respStr = await response.stream.bytesToString();
+      final data = jsonDecode(respStr);
+      await saveReportLocally({
+        'id': data['report_id'],
+        'latitude': data['latitude'],
+        'longitude': data['longitude'],
+        'description': data['description'],
+        'barangay': data['barangay'],
+        'photo': data['photo'],
+        'status': data['status'],
+        'date': data['date'],
+        'time': data['time'],
+      });
+      await sendLocalReportsToWebView();
+      // webViewController?.reload();
+    } else {
+      webViewController?.evaluateJavascript(source: """
+        Swal.fire({
+          title: 'Error!',
+          text: 'Failed to report incident.',
+          icon: 'error',
+          confirmButtonColor: '#d32f2f'
+        });
+      """);
+    }
+  }
+
+  Future<void> _showValidationDialog(String message) async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Incomplete Form'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show incident form sheet with location and barangay  
   void _showIncidentFormSheet({
     required double latitude,
     required double longitude,
     required String barangay,
+    int? editingReportId,
+    String? existingPhotoPath,
+    String? originalBarangay,
   }) {
+    _editingReportId = editingReportId;
+    _existingPhotoPath = existingPhotoPath;
+    _originalBarangay = originalBarangay;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -82,7 +269,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     Text(
-                      "Report an Incident",
+                      _editingReportId != null ? "Edit Incident Report" : "Report an Incident",
                       style: GoogleFonts.montserrat(
                         fontWeight: FontWeight.w700,
                         fontSize: 22,
@@ -90,7 +277,6 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    // Latitude & Longitude field
                     Text(
                       "Location (Latitude, Longitude)",
                       style: GoogleFonts.montserrat(
@@ -117,7 +303,6 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // Barangay field
                     Text(
                       "Barangay",
                       style: GoogleFonts.montserrat(
@@ -144,7 +329,6 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    // Image capture section
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 24),
@@ -209,9 +393,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                                   ? "Take Photo"
                                   : "Retake Photo",
                               style: GoogleFonts.montserrat(
-                                color:
-                                  Colors.white70,
-                                  fontWeight: FontWeight.w600,
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                             style: ElevatedButton.styleFrom(
@@ -261,6 +444,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                         border: Border.all(color: Colors.grey.shade300),
                       ),
                       child: TextField(
+                        controller: _descriptionController,
                         maxLines: 3,
                         style: GoogleFonts.montserrat(fontSize: 13),
                         decoration: InputDecoration(
@@ -284,22 +468,70 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                             vertical: 10,
                           ),
                         ),
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          _webViewController?.evaluateJavascript(
-                            source: """
-                              Swal.fire({
-                                title: 'Success',
-                                text: 'Report updated successfully!',
-                                icon: 'success',
-                                confirmButtonColor: '#52b855',
-                                timer: 1000
-                              });
-                            """,
+                        onPressed: () async {
+                          // Validation
+                          if (_capturedImage == null && _editingReportId == null) {
+                            await _showValidationDialog('Please take a photo.');
+                            return;
+                          }
+                          if (_descriptionController.text.trim().isEmpty) {
+                            await _showValidationDialog('Please enter a description.');
+                            return;
+                          }
+                          // For editing: if barangay changed, require new photo
+                          if (_editingReportId != null && _originalBarangay != null && barangay != _originalBarangay && _capturedImage == null) {
+                            await _showValidationDialog('Please take a new photo because the barangay was changed.');
+                            return;
+                          }
+                          Navigator.of(context).pop(); // Close the modal
+
+                          // Show loading
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (ctx) {
+                              dialogContext = ctx;
+                              return const Center(child: CircularProgressIndicator());
+                            },
                           );
+
+                          if (_editingReportId != null) {
+                            await _editIncidentReport(
+                              reportId: _editingReportId!,
+                              latitude: latitude,
+                              longitude: longitude,
+                              barangay: barangay,
+                              description: _descriptionController.text.trim(),
+                              newPhoto: _capturedImage,
+                              existingPhoto: _existingPhotoPath,
+                              context: context,
+                              webViewController: _webViewController,
+                            );
+                          } else {
+                            await _submitIncidentReport(
+                              latitude: latitude,
+                              longitude: longitude,
+                              barangay: barangay,
+                              description: _descriptionController.text.trim(),
+                              photo: _capturedImage!,
+                              context: context,
+                              webViewController: _webViewController,
+                            );
+                          }
+
+                          if (mounted && dialogContext != null && Navigator.canPop(dialogContext!)) {
+                            Navigator.of(dialogContext!).pop();
+                          }
+                          _descriptionController.clear();
+                          setState(() {
+                            _capturedImage = null;
+                            _editingReportId = null;
+                            _existingPhotoPath = null;
+                            _originalBarangay = null;
+                          });
                         },
                         child: Text(
-                          "Submit",
+                          _editingReportId != null ? "Update" : "Submit",
                           style: GoogleFonts.montserrat(
                             fontSize: 15,
                             color: Colors.white,
@@ -317,6 +549,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       ),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -332,6 +565,11 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             );
           },
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _webViewController?.reload(),
+        tooltip: "Reload Map",
+        child: const Icon(Icons.refresh),
       ),
       body: InAppWebView(
         onConsoleMessage: (controller, consoleMessage) {
@@ -360,7 +598,6 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
               final double lat = args[0];
               final double lng = args[1];
               final String barangay = args.length > 2 ? args[2] : '';
-              // Add a delay for slow-mo effect
               await Future.delayed(const Duration(milliseconds: 350));
               _showIncidentFormSheet(
                 latitude: lat,
@@ -370,9 +607,30 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             },
           );
           controller.addJavaScriptHandler(
+            handlerName: 'onEditReport',
+            callback: (args) async {
+              // args: [reportId, latitude, longitude, barangay, description, existingPhotoPath, originalBarangay]
+              final int reportId = args[0];
+              final double lat = args[1];
+              final double lng = args[2];
+              final String barangay = args[3];
+              final String description = args[4];
+              final String existingPhotoPath = args[5];
+              final String originalBarangay = args[6];
+              _descriptionController.text = description;
+              _showIncidentFormSheet(
+                latitude: lat,
+                longitude: lng,
+                barangay: barangay,
+                editingReportId: reportId,
+                existingPhotoPath: existingPhotoPath,
+                originalBarangay: originalBarangay,
+              );
+            },
+          );
+          controller.addJavaScriptHandler(
             handlerName: 'onWarningIconClick',
             callback: (args) async {
-              // Navigate to HazardMapScreen
               Navigator.push(
                 context,
                 MaterialPageRoute(

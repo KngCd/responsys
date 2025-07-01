@@ -190,18 +190,6 @@ a {text-decoration: none;}
   background: #f0f4ff;
 }
 
-#legend {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    background: white;
-    padding: 10px;
-    border-radius: 5px;
-    font-size: 14px;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
-    z-index: 1000;
-}
-
 #loader_container {
     position: fixed;
     top: 0;
@@ -231,17 +219,80 @@ a {text-decoration: none;}
 }
 
 #legend {
-    /* position: absolute;
-    bottom: 20px;
-    left: 20px; */
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
     background: white;
-    padding: 10px;
-    border-radius: 5px;
+    padding: 10px 0px 10px 0px;
+    border-radius: 8px;
     font-size: 14px;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.18);
+    z-index: 1000;
+    max-width: 260px;
+    width: auto;
 }
 
-/* Add this in the <style> section in your head */
+#legend h4 {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+#legend-list {
+    list-style: none;
+    padding: 0px 10px 0px 10px;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 8px 0px;
+}
+
+#legend-list li {
+    display: flex;
+    font-size: 13px;
+    margin: 0;
+    padding: 2px 0;
+    min-width: 80px;
+}
+
+#legend-list li span {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    margin-right: 7px;
+    border: 1px solid #ddd;
+}
+
+@media (max-width: 600px) {
+    #legend {
+        left: 8px;
+        bottom: 8px;
+        padding: 6px 6px;
+        border-radius: 7px;
+        font-size: 12px;
+        max-width: 90vw;
+    }
+    #legend h4 {
+        font-size: 13px;
+        margin-bottom: 4px;
+    }
+    #legend-list {
+        gap: 6px 10px;
+    }
+    #legend-list li {
+        font-size: 11.5px;
+        min-width: 60px;
+        padding: 1px 0;
+    }
+    #legend-list li span {
+        width: 11px;
+        height: 11px;
+        margin-right: 5px;
+    }
+}
+
 #loader-container {
     top: 0;
     left: 0;

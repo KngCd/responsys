@@ -737,6 +737,174 @@ const locateControl = L.control.locate({
     }
 }).addTo(map);
 
+// Store active markers
+window.activeMarkers = new Map();
+
+function loadLocalIncidentMarkers() {
+    // Remove old markers
+    window.activeMarkers.forEach(marker => map.removeLayer(marker));
+    window.activeMarkers.clear();
+
+    // Get reports from localStorage
+    let reports = [];
+    try {
+        reports = JSON.parse(localStorage.getItem('citizenReports')) || [];
+    } catch (e) {
+        reports = [];
+    }
+
+    // Add markers for each report
+    reports.forEach(report => {
+        if (report.status === 'Active' && report.latitude && report.longitude) {
+            const reportId = report.id ? report.id.toString() : Math.random().toString();
+            const popupContent = `
+                <div style="padding: 10px;">
+                    <div style="font-weight:bold;">${report.description || ''}</div>
+                    <div>Barangay: ${report.barangay || ''}</div>
+                    <div>Lat: ${parseFloat(report.latitude).toFixed(6)}</div>
+                    <div>Lng: ${parseFloat(report.longitude).toFixed(6)}</div>
+                    <div>Status: ${report.status || ''}</div>
+                    <button 
+                        style="margin-top:8px;width:100%;background:#4f46e5;color:white;padding:6px 0;border:none;border-radius:5px;cursor:pointer;font-weight:bold;"
+                        onclick="editReportFromMarker('${reportId}', '${report.latitude}', '${report.longitude}', '${report.barangay}', \`${(report.description || '').replace(/`/g, '\\`')}\`, '${report.photo || ''}', '${report.barangay}')">
+                        Update Report
+                    </button>
+                </div>
+            `;
+
+            const customIcon = L.icon({
+                iconUrl: 'images/marker.png',
+                iconSize: [32, 40],                // size of the icon
+                iconAnchor: [16, 40],              // point of the icon which will correspond to marker's location
+                popupAnchor: [0, -40]              // point from which the popup should open relative to the iconAnchor
+            });
+
+            const marker = L.marker([report.latitude, report.longitude], { icon: customIcon })
+                .addTo(map)
+                .bindPopup(popupContent, {
+                    closeButton: true,
+                    closeOnClick: false,
+                    autoClose: false,
+                });
+            window.activeMarkers.set(reportId, marker);
+        }
+    });
+}
+
+function deleteReportFromLocalStorage(reportId) {
+    let reports = [];
+    try {
+        reports = JSON.parse(localStorage.getItem('citizenReports')) || [];
+    } catch (e) {}
+    reports = reports.filter(r => r.id != reportId);
+    localStorage.setItem('citizenReports', JSON.stringify(reports));
+    loadLocalIncidentMarkers(); // Refresh markers
+}
+
+// Call once on load
+loadLocalIncidentMarkers();
+// Update every 3 seconds
+setInterval(loadLocalIncidentMarkers, 3000);
+
+// Store active markers
+window.activeMarkers = new Map();
+
+function loadLocalIncidentMarkers() {
+    // Remove old markers
+    window.activeMarkers.forEach(marker => map.removeLayer(marker));
+    window.activeMarkers.clear();
+
+    // Get reports from localStorage
+    let reports = [];
+    try {
+        reports = JSON.parse(localStorage.getItem('citizenReports')) || [];
+    } catch (e) {
+        reports = [];
+    }
+
+    // Add markers for each report
+    reports.forEach(report => {
+        if (report.status === 'Active' && report.latitude && report.longitude) {
+            const reportId = report.id ? report.id.toString() : Math.random().toString();
+            const popupContent = `
+                <div>
+                    <div style="font-weight:bold;">${report.description || ''}</div>
+                    <div>Barangay: ${report.barangay || ''}</div>
+                    <div>Lat: ${parseFloat(report.latitude).toFixed(6)}</div>
+                    <div>Lng: ${parseFloat(report.longitude).toFixed(6)}</div>
+                    <div>Status: ${report.status || ''}</div>
+                    <button 
+                        style="margin-top:8px;width:100%;background:#4f46e5;color:white;padding:6px 0;border:none;border-radius:5px;cursor:pointer;font-weight:bold;"
+                        onclick="editReportFromMarker('${reportId}', '${report.latitude}', '${report.longitude}', '${report.barangay}', \`${(report.description || '').replace(/`/g, '\\`')}\`, '${report.photo || ''}', '${report.barangay}')">
+                        Update Report
+                    </button>
+                </div>
+            `;
+            const marker = L.marker([report.latitude, report.longitude])
+                .addTo(map)
+                .bindPopup(popupContent, {
+                    closeButton: true,
+                    closeOnClick: false,
+                    autoClose: false,
+                });
+            window.activeMarkers.set(reportId, marker);
+        }
+    });
+}
+
+// Call once on load
+// loadLocalIncidentMarkers();
+// Update every 3 seconds
+// setInterval(loadLocalIncidentMarkers, 3000);
+
+// --- END: Marker logic from report_incidents.js ---
+
+window.setFlutterReports = function(reports) {
+    // Remove old markers if any
+    if (!window.flutterMarkers) window.flutterMarkers = [];
+    window.flutterMarkers.forEach(m => map.removeLayer(m));
+    window.flutterMarkers = [];
+
+    (reports || []).forEach(function(report) {
+        if (!report.latitude || !report.longitude) return;
+        const marker = L.marker([report.latitude, report.longitude])
+            .addTo(map)
+            .bindPopup(`
+                <div>
+                    <div style="font-weight:bold;">${report.description || ''}</div>
+                    <div>Barangay: ${report.barangay || ''}</div>
+                    <div>Lat: ${parseFloat(report.latitude).toFixed(6)}</div>
+                    <div>Lng: ${parseFloat(report.longitude).toFixed(6)}</div>
+                    <div>Status: ${report.status || ''}</div>
+                    <button 
+                        style="margin-top:8px;width:100%;background:#4f46e5;color:white;padding:6px 0;border:none;border-radius:5px;cursor:pointer;font-weight:bold;"
+                        onclick="editReportFromMarker('${report.id}', '${report.latitude}', '${report.longitude}', '${report.barangay}', \`${report.description.replace(/`/g, '\\`')}\`, '${report.photo || ''}', '${report.barangay}')">
+                        Update Report
+                    </button>
+                </div>
+            `);
+        window.flutterMarkers.push(marker);
+    });
+};
+
+function editReportFromMarker(id, latitude, longitude, barangay, description, photo, originalBarangay) {
+    // Call Flutter handler to open the edit form with pre-filled data
+    if (window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler(
+            'onEditReport',
+            parseInt(id),
+            parseFloat(latitude),
+            parseFloat(longitude),
+            barangay,
+            description,
+            photo,
+            originalBarangay
+        );
+    }
+    // Optionally, close the popup
+    map.closePopup();
+}
+
 // loading....
 document.addEventListener('DOMContentLoaded', function() {
     var loadingCheck = setInterval(function() {

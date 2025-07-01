@@ -14,14 +14,13 @@ class HazardMapScreen extends StatefulWidget {
 
 class _HazardMapScreenState extends State<HazardMapScreen> {
   final server = InAppLocalhostServer(documentRoot: 'assets/qgis_map');
+  InAppWebViewController? webViewController;
 
   @override
   void initState() {
     super.initState();
-    // server.start();
     _requestLocationPermission();
   }
-
   Future<void> _requestLocationPermission() async {
     await Permission.location.request();
   }
@@ -48,6 +47,11 @@ class _HazardMapScreenState extends State<HazardMapScreen> {
           },
         ),
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => webViewController?.reload(),
+        tooltip: "Reload Map",
+        child: const Icon(Icons.refresh),
+      ),
       body: InAppWebView(
         onConsoleMessage: (controller, consoleMessage) {
           debugPrint("JS LOG: ${consoleMessage.message}");
@@ -67,7 +71,7 @@ class _HazardMapScreenState extends State<HazardMapScreen> {
           );
         },
         onWebViewCreated: (controller) {
-          // Handle web view creation if needed
+          webViewController = controller;
         },
       ),
       bottomNavigationBar: BottomNavBar(
