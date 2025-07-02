@@ -25,6 +25,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   File? _capturedImage;
   final TextEditingController _descriptionController = TextEditingController();
   BuildContext? dialogContext;
+  Timer? _syncTimer;
 
   // For editing
   int? _editingReportId;
@@ -161,9 +162,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     _requestLocationPermission();
     fetchAndSyncReportsFromServer();
     // refresh every 2 seconds
-    Timer.periodic(Duration(seconds: 2), (timer) {
+    _syncTimer = Timer.periodic(Duration(seconds: 2), (timer) {
       fetchAndSyncReportsFromServer();
     });
+  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    _webViewController = null; // Prevent further use
+    super.dispose();
   }
 
   Future<void> _requestLocationPermission() async {
@@ -181,11 +189,12 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   }
 
   Future<void> sendLocalReportsToWebView() async {
+    if (!mounted || _webViewController == null) return;
     final prefs = await SharedPreferences.getInstance();
     final reportsString = prefs.getString('citizenReports');
     if (reportsString == null || _webViewController == null) return;
     // Send the reports as JSON to the JS handler in your HTML
-    await _webViewController!.evaluateJavascript(
+    _webViewController!.evaluateJavascript(
       source: "window.setFlutterReports($reportsString);",
     );
   }
