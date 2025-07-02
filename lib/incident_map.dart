@@ -31,6 +31,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   int? _editingReportId;
   String? _existingPhotoPath;
   String? _originalBarangay;
+  String? _editingDescription;
+  bool _isEditingLocation = false;
 
   // Robustly save report locally and update map
   Future<void> saveReportLocally(Map<String, dynamic> reportData) async {
@@ -77,9 +79,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     required BuildContext context,
     required InAppWebViewController? webViewController,
   }) async {
-    final String timeNow = TimeOfDay.now().format(context); // <-- Move this up!
+    final String timeNow = TimeOfDay.now().format(context);
     final uri = Uri.parse(
-      'http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
+      'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
     );
     final request = http.MultipartRequest('POST', uri)
       ..fields['report_id'] = reportId.toString()
@@ -120,15 +122,26 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       await fetchAndSyncReportsFromServer();
       webViewController?.evaluateJavascript(
         source: """
-        Swal.fire({
-          title: 'Success!',
-          text: 'Report updated successfully!',
-          icon: 'success',
-          confirmButtonColor: '#232A67'
-        });
-      """,
+          window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
+          window.setFlutterReports && window.setFlutterReports();
+          Swal.fire({
+            title: 'Success!',
+            text: 'Report updated successfully!',
+            icon: 'success',
+            confirmButtonColor: '#52b855', 
+            timer: 1500
+          });
+        """,
       );
-      // webViewController?.reload();
+      if (mounted) {
+        setState(() {
+          _isEditingLocation = false;
+          _editingReportId = null;
+          _existingPhotoPath = null;
+          _originalBarangay = null;
+          _editingDescription = null;
+        });
+      }
     } else {
       webViewController?.evaluateJavascript(
         source: """
@@ -136,7 +149,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           title: 'Error!',
           text: 'Failed to update report.',
           icon: 'error',
-          confirmButtonColor: '#d32f2f'
+          confirmButtonColor: '#d32f2f',
+          timer: 1500
         });
       """,
       );
@@ -146,7 +160,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   Future<void> fetchAndSyncReportsFromServer() async {
     final prefs = await SharedPreferences.getInstance();
     final response = await http.get(
-      Uri.parse('http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?all=1'),
+      Uri.parse('http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php'),
     );
     if (response.statusCode == 200) {
       final List reports = jsonDecode(response.body);
@@ -188,14 +202,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     await sendLocalReportsToWebView(); // Update the map
   }
 
+  // Send local reports to JS for marker update
   Future<void> sendLocalReportsToWebView() async {
     if (!mounted || _webViewController == null) return;
     final prefs = await SharedPreferences.getInstance();
     final reportsString = prefs.getString('citizenReports');
-    if (reportsString == null || _webViewController == null) return;
-    // Send the reports as JSON to the JS handler in your HTML
+    final safeJson = (reportsString == null || reportsString.isEmpty)
+        ? '[]'
+        : reportsString;
     _webViewController!.evaluateJavascript(
-      source: "window.setFlutterReports($reportsString);",
+      source: "window.setFlutterReports($safeJson);",
     );
   }
 
@@ -209,7 +225,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     required InAppWebViewController? webViewController,
   }) async {
     final uri = Uri.parse(
-      'http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
+      'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
     );
     final request = http.MultipartRequest('POST', uri)
       ..fields['latitude'] = latitude.toString()
@@ -238,14 +254,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       });
       await sendLocalReportsToWebView();
       await fetchAndSyncReportsFromServer();
-      // webViewController?.reload();
       await _webViewController?.evaluateJavascript(
         source: """
+          window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
+          window.setFlutterReports && window.setFlutterReports();
           Swal.fire({
             title: 'Success!',
             text: 'Report added successfully!',
             icon: 'success',
-            confirmButtonColor: '#232A67'
+            confirmButtonColor: '#52b855',
+            timer: 1500
           });
         """,
       );
@@ -256,7 +274,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           title: 'Error!',
           text: 'Failed to report incident.',
           icon: 'error',
-          confirmButtonColor: '#d32f2f'
+          confirmButtonColor: '#d32f2f',
+          timer: 1500
         });
       """,
       );
@@ -287,12 +306,13 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     int? editingReportId,
     String? existingPhotoPath,
     String? originalBarangay,
-  }) {
+    VoidCallback? onClosed,
+  }) async {
     _editingReportId = editingReportId;
     _existingPhotoPath = existingPhotoPath;
     _originalBarangay = originalBarangay;
 
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -437,6 +457,29 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                                 ),
                               ],
                             )
+                            else if ((_existingPhotoPath ?? '').isNotEmpty)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(
+                                  (() {
+                                    if (_existingPhotoPath!.startsWith('http')) {
+                                      return _existingPhotoPath!;
+                                    } else if (_existingPhotoPath!.startsWith('images/')) {
+                                      return 'http://192.168.1.10/Capstone-MDRRMO/${_existingPhotoPath!}';
+                                    } else {
+                                      return 'http://192.168.1.10/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
+                                    }
+                                  })(),
+                                  width: 180,
+                                  height: 180,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Icon(
+                                    Icons.broken_image,
+                                    size: 40,
+                                    color: Colors.red,
+                                  ),
+                                ),
+                              )
                           else
                             Icon(
                               Icons.camera_alt,
@@ -447,9 +490,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                           ElevatedButton.icon(
                             icon: Icon(Icons.camera, color: Colors.white70),
                             label: Text(
-                              _capturedImage == null
-                                  ? "Take Photo"
-                                  : "Retake Photo",
+                              _capturedImage == null ? "Take Photo" : "Retake Photo",
                               style: GoogleFonts.montserrat(
                                 color: Colors.white70,
                                 fontWeight: FontWeight.w600,
@@ -618,6 +659,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
         ),
       ),
     );
+
+    // This runs after the modal is closed (by swipe or submit/cancel)
+    // setState(() {
+    //   _isEditingLocation = false;
+    //   _editingReportId = null;
+    //   _existingPhotoPath = null;
+    //   _originalBarangay = null;
+    //   _editingDescription = null;
+    // });
+    if (onClosed != null) onClosed();
   }
 
   @override
@@ -641,75 +692,180 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
         tooltip: "Reload Map",
         child: const Icon(Icons.refresh),
       ),
-      body: InAppWebView(
-        onConsoleMessage: (controller, consoleMessage) {
-          debugPrint("JS LOG: ${consoleMessage.message}");
-        },
-        initialUrlRequest: URLRequest(
-          url: WebUri("http://localhost:8080/incident_report.html"),
-        ),
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          useShouldOverrideUrlLoading: true,
-        ),
-        onGeolocationPermissionsShowPrompt: (controller, origin) async {
-          return GeolocationPermissionShowPromptResponse(
-            origin: origin,
-            allow: true,
-            retain: true,
-          );
-        },
-        onWebViewCreated: (controller) {
-          _webViewController = controller;
-          controller.addJavaScriptHandler(
-            handlerName: 'onMapClick',
-            callback: (args) async {
-              // args[0]: latitude, args[1]: longitude, args[2]: barangay
-              final double lat = args[0];
-              final double lng = args[1];
-              final String barangay = args.length > 2 ? args[2] : '';
-              await Future.delayed(const Duration(milliseconds: 350));
-              _showIncidentFormSheet(
-                latitude: lat,
-                longitude: lng,
-                barangay: barangay,
+            body: Stack(
+        children: [
+          InAppWebView(
+            onConsoleMessage: (controller, consoleMessage) {
+              debugPrint("JS LOG: ${consoleMessage.message}");
+            },
+            initialUrlRequest: URLRequest(
+              url: WebUri("http://localhost:8080/incident_report.html"),
+            ),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: true,
+              useShouldOverrideUrlLoading: true,
+            ),
+            onGeolocationPermissionsShowPrompt: (controller, origin) async {
+              return GeolocationPermissionShowPromptResponse(
+                origin: origin,
+                allow: true,
+                retain: true,
               );
             },
-          );
-          controller.addJavaScriptHandler(
-            handlerName: 'onEditReport',
-            callback: (args) async {
-              // args: [reportId, latitude, longitude, barangay, description, existingPhotoPath, originalBarangay]
-              final int reportId = args[0];
-              final double lat = args[1];
-              final double lng = args[2];
-              final String barangay = args[3];
-              final String description = args[4];
-              final String existingPhotoPath = args[5];
-              final String originalBarangay = args[6];
-              _descriptionController.text = description;
-              _showIncidentFormSheet(
-                latitude: lat,
-                longitude: lng,
-                barangay: barangay,
-                editingReportId: reportId,
-                existingPhotoPath: existingPhotoPath,
-                originalBarangay: originalBarangay,
+            onWebViewCreated: (controller) {
+              _webViewController = controller;
+              controller.addJavaScriptHandler(
+                handlerName: 'onMapClick',
+                callback: (args) async {
+                  final double lat = args[0];
+                  final double lng = args[1];
+                  final String barangay = args.length > 2 ? args[2] : '';
+                  await Future.delayed(const Duration(milliseconds: 350));
+                  if (_editingReportId != null) {
+                    // Use retained fields for the form
+                    _descriptionController.text = _editingDescription ?? '';
+                    _showIncidentFormSheet(
+                      latitude: lat,
+                      longitude: lng,
+                      barangay: barangay,
+                      editingReportId: _editingReportId,
+                      existingPhotoPath: _existingPhotoPath,
+                      originalBarangay: _originalBarangay,
+                    );
+                    // setState(() {
+                    //   _isEditingLocation = false; // Hide banner after picking location
+                    //   // Do NOT clear editing fields here, only after submit/cancel
+                    // });
+                  } else {
+                    _showIncidentFormSheet(
+                      latitude: lat,
+                      longitude: lng,
+                      barangay: barangay,
+                    );
+                  }
+                },
+              );
+              controller.addJavaScriptHandler(
+                handlerName: 'onEditReport',
+                callback: (args) async {
+                  final int reportId = args[0];
+                  final double lat = args[1];
+                  final double lng = args[2];
+                  final String barangay = args[3];
+                  final String description = args[4];
+                  final String existingPhotoPath = args[5];
+                  final String originalBarangay = args[6];
+      
+                  final updateLocation = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Update Location?'),
+                      content: const Text('Do you want to update the location for this report?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('No'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Yes'),
+                        ),
+                      ],
+                    ),
+                  );
+      
+                  if (updateLocation == true) {
+                    _descriptionController.text = description;
+                    setState(() {
+                      _editingReportId = reportId;
+                      _existingPhotoPath = existingPhotoPath;
+                      _originalBarangay = originalBarangay;
+                      _editingDescription = description;
+                      _isEditingLocation = true; // Show banner
+                    });
+                    if (mounted) {
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Tap on the map to select the new location.',
+                          ),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                    // Wait for map click, then open form with new lat/lng
+                  } else {
+                    _descriptionController.text = description;
+                    _showIncidentFormSheet(
+                      latitude: lat,
+                      longitude: lng,
+                      barangay: barangay,
+                      editingReportId: reportId,
+                      existingPhotoPath: existingPhotoPath,
+                      originalBarangay: originalBarangay,
+                      onClosed: () {
+                        setState(() {
+                          _editingDescription = null;
+                          _isEditingLocation = false;
+                          _editingReportId = null;
+                          _existingPhotoPath = null;
+                          _originalBarangay = null;
+                        });
+                      },
+                    );
+                  }
+                },
+              );
+              controller.addJavaScriptHandler(
+                handlerName: 'onWarningIconClick',
+                callback: (args) async {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const HazardMapScreen(),
+                    ),
+                  );
+                },
               );
             },
-          );
-          controller.addJavaScriptHandler(
-            handlerName: 'onWarningIconClick',
-            callback: (args) async {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const HazardMapScreen(),
+          ),
+          if (_isEditingLocation)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                color: Colors.amber[700],
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "You're currently editing the report location",
+                        style: GoogleFonts.montserrat(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: Colors.white),
+                      onPressed: () {
+                        setState(() {
+                          _isEditingLocation = false;
+                          _editingReportId = null;
+                          _existingPhotoPath = null;
+                          _originalBarangay = null;
+                          _editingDescription = null;
+                        });
+                      },
+                    ),
+                  ],
                 ),
-              );
-            },
-          );
-        },
+              ),
+            ),
+        ],
       ),
       bottomNavigationBar: BottomNavBar(
         current: NavPage.incident,
