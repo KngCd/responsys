@@ -31,6 +31,7 @@ flutter:
     - assets/images/
     - assets/qgis_map/
     - assets/qgis_map/css/
+    - assets/qgis_map/css/images/
     - assets/qgis_map/js/
     - assets/qgis_map/images/
     - assets/qgis_map/data/

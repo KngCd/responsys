@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
@@ -30,6 +31,28 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   String? _existingPhotoPath;
   String? _originalBarangay;
 
+  // Robustly save report locally and update map
+  Future<void> saveReportLocally(Map<String, dynamic> reportData) async {
+    final prefs = await SharedPreferences.getInstance();
+    final reportsString = prefs.getString('citizenReports');
+    List reports = reportsString != null
+        ? List<Map<String, dynamic>>.from(jsonDecode(reportsString))
+        : [];
+    // If editing, replace; if new, add
+    if (reportData['id'] != null) {
+      final idx = reports.indexWhere((r) => r['id'] == reportData['id']);
+      if (idx != -1) {
+        reports[idx] = reportData;
+      } else {
+        reports.add(reportData);
+      }
+    } else {
+      reports.add(reportData);
+    }
+    await prefs.setString('citizenReports', jsonEncode(reports));
+    await sendLocalReportsToWebView(); // Always update map after save
+  }
+
   Future<void> _openCamera(Function(File) onImagePicked) async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(
@@ -54,26 +77,30 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     required InAppWebViewController? webViewController,
   }) async {
     final String timeNow = TimeOfDay.now().format(context); // <-- Move this up!
-    final uri = Uri.parse('http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php');
+    final uri = Uri.parse(
+      'http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
+    );
     final request = http.MultipartRequest('POST', uri)
       ..fields['report_id'] = reportId.toString()
       ..fields['latitude'] = latitude.toString()
       ..fields['longitude'] = longitude.toString()
       ..fields['description'] = description
       ..fields['barangay'] = barangay;
-  
+
     if (newPhoto != null) {
       request.fields['isNewPhoto'] = 'true';
-      request.files.add(await http.MultipartFile.fromPath('photoData', newPhoto.path));
+      request.files.add(
+        await http.MultipartFile.fromPath('photoData', newPhoto.path),
+      );
     } else if (existingPhoto != null) {
       request.fields['isNewPhoto'] = 'false';
       request.fields['existingPhoto'] = existingPhoto;
     }
-  
+
     final response = await request.send();
-  
+
     if (!mounted) return;
-  
+
     if (response.statusCode == 200) {
       final respStr = await response.stream.bytesToString();
       final data = jsonDecode(respStr);
@@ -89,63 +116,58 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
         'time': timeNow, // Use the captured value
       });
       await sendLocalReportsToWebView();
-      webViewController?.evaluateJavascript(source: """
+      await fetchAndSyncReportsFromServer();
+      webViewController?.evaluateJavascript(
+        source: """
         Swal.fire({
           title: 'Success!',
           text: 'Report updated successfully!',
           icon: 'success',
           confirmButtonColor: '#232A67'
         });
-      """);
+      """,
+      );
       // webViewController?.reload();
     } else {
-      webViewController?.evaluateJavascript(source: """
+      webViewController?.evaluateJavascript(
+        source: """
         Swal.fire({
           title: 'Error!',
           text: 'Failed to update report.',
           icon: 'error',
           confirmButtonColor: '#d32f2f'
         });
-      """);
+      """,
+      );
     }
   }
 
+  Future<void> fetchAndSyncReportsFromServer() async {
+    final prefs = await SharedPreferences.getInstance();
+    final response = await http.get(
+      Uri.parse('http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?all=1'),
+    );
+    if (response.statusCode == 200) {
+      final List reports = jsonDecode(response.body);
+      // Only keep active and not deleted in localStorage, but keep all for reference
+      await prefs.setString('citizenReports', jsonEncode(reports));
+      await sendLocalReportsToWebView();
+    }
+  }
+  
   @override
   void initState() {
     super.initState();
     _requestLocationPermission();
+    fetchAndSyncReportsFromServer();
+    // refresh every 2 seconds
+    Timer.periodic(Duration(seconds: 2), (timer) {
+      fetchAndSyncReportsFromServer();
+    });
   }
 
   Future<void> _requestLocationPermission() async {
     await Permission.location.request();
-  }
-
-  Future<void> sendLocalReportsToWebView() async {
-    final prefs = await SharedPreferences.getInstance();
-    final reportsString = prefs.getString('citizenReports');
-    if (reportsString == null || _webViewController == null) return;
-    // Send the reports as JSON to the JS handler in your HTML
-    await _webViewController!.evaluateJavascript(
-      source: "window.setFlutterReports($reportsString);"
-    );
-  }
-
-  Future<void> saveReportLocally(Map<String, dynamic> reportData) async {
-    final prefs = await SharedPreferences.getInstance();
-    final reportsString = prefs.getString('citizenReports');
-    List reports = reportsString != null ? List<Map<String, dynamic>>.from(jsonDecode(reportsString)) : [];
-    // If editing, replace; if new, add
-    if (reportData['id'] != null) {
-      final idx = reports.indexWhere((r) => r['id'] == reportData['id']);
-      if (idx != -1) {
-        reports[idx] = reportData;
-      } else {
-        reports.add(reportData);
-      }
-    } else {
-      reports.add(reportData);
-    }
-    await prefs.setString('citizenReports', jsonEncode(reports));
   }
 
   Future<void> deleteReportLocally(int reportId) async {
@@ -158,6 +180,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     await sendLocalReportsToWebView(); // Update the map
   }
 
+  Future<void> sendLocalReportsToWebView() async {
+    final prefs = await SharedPreferences.getInstance();
+    final reportsString = prefs.getString('citizenReports');
+    if (reportsString == null || _webViewController == null) return;
+    // Send the reports as JSON to the JS handler in your HTML
+    await _webViewController!.evaluateJavascript(
+      source: "window.setFlutterReports($reportsString);",
+    );
+  }
+
   Future<void> _submitIncidentReport({
     required double latitude,
     required double longitude,
@@ -167,7 +199,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     required BuildContext context,
     required InAppWebViewController? webViewController,
   }) async {
-    final uri = Uri.parse('http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php');
+    final uri = Uri.parse(
+      'http://192.168.197.197/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
+    );
     final request = http.MultipartRequest('POST', uri)
       ..fields['latitude'] = latitude.toString()
       ..fields['longitude'] = longitude.toString()
@@ -194,16 +228,29 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
         'time': data['time'],
       });
       await sendLocalReportsToWebView();
+      await fetchAndSyncReportsFromServer();
       // webViewController?.reload();
+      await _webViewController?.evaluateJavascript(
+        source: """
+          Swal.fire({
+            title: 'Success!',
+            text: 'Report added successfully!',
+            icon: 'success',
+            confirmButtonColor: '#232A67'
+          });
+        """,
+      );
     } else {
-      webViewController?.evaluateJavascript(source: """
+      webViewController?.evaluateJavascript(
+        source: """
         Swal.fire({
           title: 'Error!',
           text: 'Failed to report incident.',
           icon: 'error',
           confirmButtonColor: '#d32f2f'
         });
-      """);
+      """,
+      );
     }
   }
 
@@ -223,7 +270,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     );
   }
 
-  // Show incident form sheet with location and barangay  
+  // Show incident form sheet with location and barangay
   void _showIncidentFormSheet({
     required double latitude,
     required double longitude,
@@ -269,7 +316,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     Text(
-                      _editingReportId != null ? "Edit Incident Report" : "Report an Incident",
+                      _editingReportId != null
+                          ? "Edit Incident Report"
+                          : "Report an Incident",
                       style: GoogleFonts.montserrat(
                         fontWeight: FontWeight.w700,
                         fontSize: 22,
@@ -387,7 +436,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                             ),
                           const SizedBox(height: 8),
                           ElevatedButton.icon(
-                            icon: Icon(Icons.camera, color: Colors.white70,),
+                            icon: Icon(Icons.camera, color: Colors.white70),
                             label: Text(
                               _capturedImage == null
                                   ? "Take Photo"
@@ -470,17 +519,25 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                         ),
                         onPressed: () async {
                           // Validation
-                          if (_capturedImage == null && _editingReportId == null) {
+                          if (_capturedImage == null &&
+                              _editingReportId == null) {
                             await _showValidationDialog('Please take a photo.');
                             return;
                           }
                           if (_descriptionController.text.trim().isEmpty) {
-                            await _showValidationDialog('Please enter a description.');
+                            await _showValidationDialog(
+                              'Please enter a description.',
+                            );
                             return;
                           }
                           // For editing: if barangay changed, require new photo
-                          if (_editingReportId != null && _originalBarangay != null && barangay != _originalBarangay && _capturedImage == null) {
-                            await _showValidationDialog('Please take a new photo because the barangay was changed.');
+                          if (_editingReportId != null &&
+                              _originalBarangay != null &&
+                              barangay != _originalBarangay &&
+                              _capturedImage == null) {
+                            await _showValidationDialog(
+                              'Please take a new photo because the barangay was changed.',
+                            );
                             return;
                           }
                           Navigator.of(context).pop(); // Close the modal
@@ -491,7 +548,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                             barrierDismissible: false,
                             builder: (ctx) {
                               dialogContext = ctx;
-                              return const Center(child: CircularProgressIndicator());
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
                             },
                           );
 
@@ -519,7 +578,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                             );
                           }
 
-                          if (mounted && dialogContext != null && Navigator.canPop(dialogContext!)) {
+                          if (mounted &&
+                              dialogContext != null &&
+                              Navigator.canPop(dialogContext!)) {
                             Navigator.of(dialogContext!).pop();
                           }
                           _descriptionController.clear();
