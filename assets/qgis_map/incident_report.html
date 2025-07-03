@@ -586,10 +586,100 @@
         }
     });
 
+    window.isIncidentFormOpen = false;
+    window.geolocateMarker = null;
+    window.geolocateRequestActive = false;
+    
+    // Helper to find barangay for a given lat/lng
+    function getBarangayForLatLng(lat, lng) {
+        let foundBarangay = null;
+        layer_PG_Brgy_Boundary_Cadastral_edited_1.eachLayer(function (layer) {
+            if (layer.feature && layer.feature.geometry) {
+                var point = turf.point([lng, lat]);
+                var polygon = layer.feature;
+                if (turf.booleanPointInPolygon(point, polygon)) {
+                    foundBarangay = layer.feature.properties.Barangay || "Unknown";
+                }
+            }
+        });
+        return foundBarangay;
+    }
+
+    // Listen for location found (from the location control)
+    map.on('locationfound', function(e) {
+        var lat = e.latitude || e.latlng.lat;
+        var lng = e.longitude || e.latlng.lng;
+        var barangay = getBarangayForLatLng(lat, lng);
+
+        // Remove previous geolocate marker if any
+        if (window.geolocateMarker) {
+            map.removeLayer(window.geolocateMarker);
+            window.geolocateMarker = null;
+        }
+
+        // Add a default Leaflet marker at the geolocated position
+        // window.geolocateMarker = L.marker([lat, lng]).addTo(map);
+
+        // Only show the form if geolocateRequestActive is true
+        if (window.geolocateRequestActive) {
+            if (barangay) {
+                if (!window.isIncidentFormOpen && window.flutter_inappwebview) {
+                    window.isIncidentFormOpen = true;
+                    window.flutter_inappwebview.callHandler('onMapClick', lat, lng, barangay);
+                }
+            } else {
+                Swal.fire({
+                    toast: true,
+                    position: 'top',
+                    icon: 'error',
+                    title: "Your location is outside the Padre Garcia boundary.",
+                    showConfirmButton: false,
+                    timer: 2000,
+                    timerProgressBar: true,
+                    customClass: { popup: 'swal2-geo-tooltip' }
+                });
+            }
+            window.geolocateRequestActive = false; // Reset so it only triggers once per button click
+        }
+
+        // Remove the location marker after use (from locate plugin)
+        if (map._locateMarker) {
+            map.removeLayer(map._locateMarker);
+            map._locateMarker = null;
+        }
+    });
+
+    // Remove the geolocate marker when the form is closed (Flutter should call this)
+    window.removeGeolocateMarker = function() {
+        if (window.geolocateMarker) {
+            map.removeLayer(window.geolocateMarker);
+            window.geolocateMarker = null;
+        }
+    };
+    
+    // Optionally, hide the location marker after the form is opened
+    map.on('locationfound', function(e) {
+        // Remove the marker after a short delay (or immediately)
+        setTimeout(function() {
+            if (map._locateMarker) {
+                map.removeLayer(map._locateMarker);
+                map._locateMarker = null;
+            }
+        }, 500);
+    });
+
+
     map.on('click', function (e) {
         var lat = e.latlng.lat;
         var lng = e.latlng.lng;
-        var foundBarangay = null;
+        // var foundBarangay = null;
+        var foundBarangay = getBarangayForLatLng(lat, lng);
+
+        // Remove the marker when the user clicks on the map to pick a new location
+        if (window.geolocateMarker) {
+            map.removeLayer(window.geolocateMarker);
+            window.geolocateMarker = null;
+        }
 
         // Loop through each barangay polygon to check if the point is inside
         layer_PG_Brgy_Boundary_Cadastral_edited_1.eachLayer(function (layer) {
@@ -610,20 +700,23 @@
         } else {
             // Show error if outside boundary
             Swal.fire({
-                title: "Error",
-                text: "Please click inside the Padre Garcia boundary.",
-                icon: "error",
-                confirmButtonColor: "#d32f2f",
-                timer: 1000
+                toast: true,
+                position: 'top',
+                icon: 'error',
+                title: "Please click inside the Padre Garcia boundary.",
+                showConfirmButton: false,
+                timer: 2000,
+                timerProgressBar: true,
+                customClass: { popup: 'swal2-geo-tooltip' }
             });
         }
     });
-
+    
     // Update the locate control to show form when location is inside boundary
     // --- BEGIN: Robust Incident Report Logic (from report_incidents.js) ---
 
     window.activeMarkers = new Map();
-    
+
     window.saveUserReportToLocalStorage = function(report) {
         let localReports = JSON.parse(localStorage.getItem("citizenReports") || "[]");
         // Remove if already exists (by id)
@@ -642,17 +735,22 @@
         });
         localStorage.setItem("citizenReports", JSON.stringify(localReports));
         // Log to console for verification
-        console.log("citizenReports in localStorage:", localStorage.getItem("citizenReports"));
+        console.log(
+          "citizenReports in localStorage:\n",
+          JSON.stringify(JSON.parse(localStorage.getItem("citizenReports") || "[]"), null, 2)
+        );    
     };
 
     function loadUserReports() {
         // 1. Get user's reports from localStorage
-        let localReports = JSON.parse(localStorage.getItem("citizenReports") || "[]");
+        let localReports = JSON.parse(localStorage.getItem("citizenReports") || "[]");  
+
         if (localReports.length === 0) {
             window.activeMarkers.forEach(marker => map.removeLayer(marker));
             window.activeMarkers.clear();
             return;
         }
+
         // 2. Get their IDs
         const reportIds = localReports.map(report => report.id);
     
@@ -660,6 +758,12 @@
         fetch(`http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
             .then(response => response.json())
             .then(dbReports => {
+                // Log current local reports for debugging
+                console.log(
+                "Current citizenReports in localStorage:\n",
+                JSON.stringify(JSON.parse(localStorage.getItem("citizenReports") || "[]"), null, 2)
+                );  
+
                 // 4. Remove deleted reports from localStorage
                 const validReportIds = new Set(dbReports.map(r => r.report_id));
                 localReports = localReports.filter(r => validReportIds.has(r.id));
@@ -685,7 +789,7 @@
     
                 // 6. Save updated reports back to localStorage
                 localStorage.setItem("citizenReports", JSON.stringify(localReports));
-    
+
                 // 7. Remove all existing markers
                 for (let [reportId, marker] of window.activeMarkers) {
                     map.removeLayer(marker);
@@ -773,6 +877,14 @@
     document.addEventListener('DOMContentLoaded', function () {
         // Call once on load
         // loadReports();
+
+        // Listen for the locate control button click
+        const locateBtn = document.querySelector('.leaflet-control-locate a');
+        if (locateBtn) {
+            locateBtn.addEventListener('click', function() {
+                window.geolocateRequestActive = true;
+            });
+        }
 
         var loadingCheck = setInterval(function () {
             if (document.readyState === 'complete') {

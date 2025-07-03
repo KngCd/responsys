@@ -125,12 +125,15 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
           window.setFlutterReports && window.setFlutterReports();
           Swal.fire({
-            title: 'Success!',
-            text: 'Report updated successfully!',
+            toast: true,
+            position: 'top',
             icon: 'success',
-            confirmButtonColor: '#52b855', 
-            timer: 1500
-          });
+            title: "Report updated successfully!",
+            showConfirmButton: false,
+            timer: 2000,
+            timerProgressBar: true,
+            customClass: { popup: 'swal2-geo-tooltip' }
+        });
         """,
       );
       if (mounted) {
@@ -146,11 +149,14 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       webViewController?.evaluateJavascript(
         source: """
         Swal.fire({
-          title: 'Error!',
-          text: 'Failed to update report.',
-          icon: 'error',
-          confirmButtonColor: '#d32f2f',
-          timer: 1500
+            toast: true,
+            position: 'top',
+            icon: 'error',
+            title: "Failed to update report.",
+            showConfirmButton: false,
+            timer: 2000,
+            timerProgressBar: true,
+            customClass: { popup: 'swal2-geo-tooltip' }
         });
       """,
       );
@@ -259,11 +265,14 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
           window.setFlutterReports && window.setFlutterReports();
           Swal.fire({
-            title: 'Success!',
-            text: 'Report added successfully!',
-            icon: 'success',
-            confirmButtonColor: '#52b855',
-            timer: 1500
+              toast: true,
+              position: 'top',
+              icon: 'success',
+              title: "Report added successfully!",
+              showConfirmButton: false,
+              timer: 2000,
+              timerProgressBar: true,
+              customClass: { popup: 'swal2-geo-tooltip' }
           });
         """,
       );
@@ -271,11 +280,14 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       webViewController?.evaluateJavascript(
         source: """
         Swal.fire({
-          title: 'Error!',
-          text: 'Failed to report incident.',
-          icon: 'error',
-          confirmButtonColor: '#d32f2f',
-          timer: 1500
+            toast: true,
+            position: 'top',
+            icon: 'error',
+            title: "Failed to add report.",
+            showConfirmButton: false,
+            timer: 2000,
+            timerProgressBar: true,
+            customClass: { popup: 'swal2-geo-tooltip' }
         });
       """,
       );
@@ -658,7 +670,12 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      if (onClosed != null) onClosed();
+      _webViewController?.evaluateJavascript(
+        source: "window.isIncidentFormOpen = false; window.removeGeolocateMarker && window.removeGeolocateMarker();"
+      );
+    });
 
     // This runs after the modal is closed (by swipe or submit/cancel)
     // setState(() {
@@ -668,7 +685,6 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     //   _originalBarangay = null;
     //   _editingDescription = null;
     // });
-    if (onClosed != null) onClosed();
   }
 
   @override
