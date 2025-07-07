@@ -668,6 +668,31 @@
         }, 500);
     });
 
+    window.resolveBarangayViaHiddenLocate = function () {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) {
+                return reject("Geolocation is not supported by your browser.");
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                function (position) {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+
+                    const barangay = getBarangayForLatLng(lat, lng) || "Unknown Barangay";
+                    resolve(barangay);
+                },
+                function (error) {
+                    reject("Geolocation error: " + error.message);
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 10000
+                }
+            );
+        });
+    };
 
     map.on('click', function (e) {
         var lat = e.latlng.lat;
@@ -755,14 +780,14 @@
         const reportIds = localReports.map(report => report.id);
     
         // 3. Fetch their current status from the DB
-        fetch(`http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
+        fetch(`http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
             .then(response => response.json())
             .then(dbReports => {
                 // Log current local reports for debugging
-                console.log(
-                "Current citizenReports in localStorage:\n",
-                JSON.stringify(JSON.parse(localStorage.getItem("citizenReports") || "[]"), null, 2)
-                );  
+                // console.log(
+                // "Current citizenReports in localStorage:\n",
+                // JSON.stringify(JSON.parse(localStorage.getItem("citizenReports") || "[]"), null, 2)
+                // );  
 
                 // 4. Remove deleted reports from localStorage
                 const validReportIds = new Set(dbReports.map(r => r.report_id));

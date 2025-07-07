@@ -598,7 +598,7 @@ var hazardColors = {
 
 // Function to fetch hazards
 function fetchHazards() {
-    fetch("http://192.168.1.10/Capstone-MDRRMO/php/hazards/fetch_citizen_hazards.php")   
+    fetch("http://192.168.1.7/Capstone-MDRRMO/php/hazards/fetch_citizen_hazards.php")   
         .then((response) => {
             if (!response.ok) throw new Error("Network response was not ok");
             return response.json();

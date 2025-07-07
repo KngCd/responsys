@@ -1,12 +1,19 @@
 import 'dart:io';
+// import 'dart:developer';
 import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:permission_handler/permission_handler.dart';
+// import 'package:geolocator/geolocator.dart';
+// import 'package:geocoding/geocoding.dart'; 
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
+
 import 'package:google_fonts/google_fonts.dart';
 import 'main.dart';
 import 'hazard_map.dart';
@@ -22,6 +29,8 @@ class QgisMapScreen extends StatefulWidget {
 class _QgisMapScreenState extends State<QgisMapScreen> {
   final server = InAppLocalhostServer(documentRoot: 'assets/qgis_map');
   InAppWebViewController? _webViewController;
+  final Completer<InAppWebViewController> _controllerCompleter = Completer<InAppWebViewController>();
+
   File? _capturedImage;
   final TextEditingController _descriptionController = TextEditingController();
   BuildContext? dialogContext;
@@ -56,15 +65,115 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     await sendLocalReportsToWebView(); // Always update map after save
   }
 
+  Future<File> addWatermarkToImage(File originalImage, String barangay) async {
+    final bytes = await originalImage.readAsBytes();
+    img.Image? image = img.decodeImage(bytes);
+    if (image == null) return originalImage;
+
+    // Format date in 12-hour format with leading zero fix
+    final now = DateTime.now();
+    int hour = now.hour % 12;
+    hour = hour == 0 ? 12 : hour;
+    final dateStr =
+        "${now.month}/${now.day}/${now.year}, $hour:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')} ${now.hour >= 12 ? 'PM' : 'AM'}";
+
+    final watermark = "Date/Time: $dateStr\nBarangay: $barangay";
+
+    // Font setup
+    final font = img.arial48;
+
+    // Split text into lines
+    final linesList = watermark.split('\n');
+    final lineSpacing = 4;
+
+    // Total text height (with spacing)
+    final totalTextHeight =
+        linesList.length * font.lineHeight +
+        ((linesList.length - 1) * lineSpacing);
+
+    final barHeight = totalTextHeight + 40; // padding
+
+    // Draw white background bar
+    img.fillRect(
+      image,
+      x1: 0,
+      y1: image.height - barHeight,
+      x2: image.width,
+      y2: image.height,
+      color: img.ColorRgb8(255, 255, 255),
+    );
+
+    // Center text vertically
+    int textY = image.height - barHeight + ((barHeight - totalTextHeight) ~/ 2);
+    final textX = 20;
+
+    // Draw each line (bold simulation)
+    for (final line in linesList) {
+      for (int dx = 0; dx <= 1; dx++) {
+        for (int dy = 0; dy <= 1; dy++) {
+          img.drawString(
+            image,
+            line,
+            font: font,
+            x: textX + dx,
+            y: textY + dy,
+            color: img.ColorRgb8(0, 0, 0),
+          );
+        }
+      }
+      textY += font.lineHeight + lineSpacing;
+    }
+
+    // Save to temporary file
+    final tempDir = await getTemporaryDirectory();
+    final newPath =
+        "${tempDir.path}/watermarked_${DateTime.now().millisecondsSinceEpoch}.jpg";
+    final newFile = File(newPath)
+      ..writeAsBytesSync(img.encodeJpg(image, quality: 90));
+
+    return newFile;
+  }
+
+  Future<String> _getBarangayFromLeaflet() async {
+    try {
+      final controller = await _controllerCompleter.future;
+
+      final result = await controller.callAsyncJavaScript(
+        functionBody: "return window.resolveBarangayViaHiddenLocate();",
+      );
+
+      if (result != null && result.value is String) {
+        final value = result.value?.toString().trim();
+        if (value != null && value.isNotEmpty) {
+          return value;
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Failed to get barangay from Leaflet: $e");
+    }
+
+    return "Unknown Barangay";
+  }
+
   Future<void> _openCamera(Function(File) onImagePicked) async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 80,
     );
+
     if (pickedFile != null) {
       final file = File(pickedFile.path);
-      onImagePicked(file);
+
+      // Get barangay from map instead of native geolocation
+      final barangayFromLeaflet = await _getBarangayFromLeaflet();
+
+      final watermarkedFile = await addWatermarkToImage(
+        file,
+        barangayFromLeaflet,
+      );
+
+      onImagePicked(watermarkedFile);
     }
   }
 
@@ -81,7 +190,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   }) async {
     final String timeNow = TimeOfDay.now().format(context);
     final uri = Uri.parse(
-      'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
+      'http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
     );
     final request = http.MultipartRequest('POST', uri)
       ..fields['report_id'] = reportId.toString()
@@ -166,7 +275,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   Future<void> fetchAndSyncReportsFromServer() async {
     final prefs = await SharedPreferences.getInstance();
     final response = await http.get(
-      Uri.parse('http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php'),
+      Uri.parse('http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php'),
     );
     if (response.statusCode == 200) {
       final List reports = jsonDecode(response.body);
@@ -231,7 +340,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     required InAppWebViewController? webViewController,
   }) async {
     final uri = Uri.parse(
-      'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
+      'http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
     );
     final request = http.MultipartRequest('POST', uri)
       ..fields['latitude'] = latitude.toString()
@@ -323,6 +432,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     _editingReportId = editingReportId;
     _existingPhotoPath = existingPhotoPath;
     _originalBarangay = originalBarangay;
+    bool isPhotoLoading = false;
 
     await showModalBottomSheet(
       context: context,
@@ -375,21 +485,19 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    SizedBox(
+                    Container(
                       width: double.infinity,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: Text(
-                          "$latitude, $longitude",
-                          style: GoogleFonts.montserrat(fontSize: 14),
-                        ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        "$latitude, $longitude",
+                        style: GoogleFonts.montserrat(fontSize: 14),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -401,21 +509,19 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    SizedBox(
+                    Container(
                       width: double.infinity,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: Text(
-                          barangay,
-                          style: GoogleFonts.montserrat(fontSize: 14),
-                        ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        barangay,
+                        style: GoogleFonts.montserrat(fontSize: 14),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -428,7 +534,12 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                       child: Column(
                         children: [
-                          if (_capturedImage != null)
+                          if (isPhotoLoading)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 20),
+                              child: CircularProgressIndicator(),
+                            )
+                          else if (_capturedImage != null)
                             Stack(
                               alignment: Alignment.topRight,
                               children: [
@@ -454,7 +565,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                                       });
                                     },
                                     child: Container(
-                                      decoration: BoxDecoration(
+                                      decoration: const BoxDecoration(
                                         color: Colors.black54,
                                         shape: BoxShape.circle,
                                       ),
@@ -469,40 +580,48 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                                 ),
                               ],
                             )
-                            else if ((_existingPhotoPath ?? '').isNotEmpty)
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  (() {
-                                    if (_existingPhotoPath!.startsWith('http')) {
-                                      return _existingPhotoPath!;
-                                    } else if (_existingPhotoPath!.startsWith('images/')) {
-                                      return 'http://192.168.1.10/Capstone-MDRRMO/${_existingPhotoPath!}';
-                                    } else {
-                                      return 'http://192.168.1.10/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
-                                    }
-                                  })(),
-                                  width: 180,
-                                  height: 180,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => Icon(
-                                    Icons.broken_image,
-                                    size: 40,
-                                    color: Colors.red,
-                                  ),
-                                ),
-                              )
+                          else if ((_existingPhotoPath ?? '').isNotEmpty)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.network(
+                                (() {
+                                  if (_existingPhotoPath!.startsWith('http')) {
+                                    return _existingPhotoPath!;
+                                  } else if (_existingPhotoPath!.startsWith(
+                                    'images/',
+                                  )) {
+                                    return 'http://192.168.1.7/Capstone-MDRRMO/${_existingPhotoPath!}';
+                                  } else {
+                                    return 'http://192.168.1.7/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
+                                  }
+                                })(),
+                                width: 180,
+                                height: 180,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    const Icon(
+                                      Icons.broken_image,
+                                      size: 40,
+                                      color: Colors.red,
+                                    ),
+                              ),
+                            )
                           else
-                            Icon(
+                            const Icon(
                               Icons.camera_alt,
                               size: 40,
                               color: Colors.black54,
                             ),
                           const SizedBox(height: 8),
                           ElevatedButton.icon(
-                            icon: Icon(Icons.camera, color: Colors.white70),
+                            icon: const Icon(
+                              Icons.camera,
+                              color: Colors.white70,
+                            ),
                             label: Text(
-                              _capturedImage == null ? "Take Photo" : "Retake Photo",
+                              _capturedImage == null
+                                  ? "Take Photo"
+                                  : "Retake Photo",
                               style: GoogleFonts.montserrat(
                                 color: Colors.white70,
                                 fontWeight: FontWeight.w600,
@@ -515,9 +634,11 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                               ),
                             ),
                             onPressed: () async {
+                              setModalState(() => isPhotoLoading = true);
                               await _openCamera((file) {
                                 setModalState(() {
                                   _capturedImage = file;
+                                  isPhotoLoading = false;
                                 });
                                 setState(() {
                                   _capturedImage = file;
@@ -564,100 +685,124 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                               "Write a short description about the witnessed incident.",
                           hintStyle: GoogleFonts.montserrat(fontSize: 13),
                         ),
+                        onChanged: (_) => setModalState(() {}),
                       ),
                     ),
                     const SizedBox(height: 20),
                     Center(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF232A67),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
+                      child: Opacity(
+                        opacity:
+                            isPhotoLoading ||
+                                (_editingReportId == null &&
+                                    _capturedImage == null) ||
+                                _descriptionController.text.trim().isEmpty
+                            ? 0.4
+                            : 1.0,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF232A67),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 28,
+                              vertical: 10,
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 28,
-                            vertical: 10,
-                          ),
-                        ),
-                        onPressed: () async {
-                          // Validation
-                          if (_capturedImage == null &&
-                              _editingReportId == null) {
-                            await _showValidationDialog('Please take a photo.');
-                            return;
-                          }
-                          if (_descriptionController.text.trim().isEmpty) {
-                            await _showValidationDialog(
-                              'Please enter a description.',
-                            );
-                            return;
-                          }
-                          // For editing: if barangay changed, require new photo
-                          if (_editingReportId != null &&
-                              _originalBarangay != null &&
-                              barangay != _originalBarangay &&
-                              _capturedImage == null) {
-                            await _showValidationDialog(
-                              'Please take a new photo because the barangay was changed.',
-                            );
-                            return;
-                          }
-                          Navigator.of(context).pop(); // Close the modal
+                          onPressed:
+                              isPhotoLoading ||
+                                  (_editingReportId == null &&
+                                      _capturedImage == null) ||
+                                  _descriptionController.text.trim().isEmpty
+                              ? () {} // Do nothing
+                              : () async {
+                                  final isNewReport = _editingReportId == null;
+                                  final hasImage = _capturedImage != null;
+                                  final hasDescription = _descriptionController.text
+                                      .trim()
+                                      .isNotEmpty;
 
-                          // Show loading
-                          showDialog(
-                            context: context,
-                            barrierDismissible: false,
-                            builder: (ctx) {
-                              dialogContext = ctx;
-                              return const Center(
-                                child: CircularProgressIndicator(),
-                              );
-                            },
-                          );
+                                  final isBarangayChangedWithoutNewPhoto =
+                                      !isNewReport &&
+                                      _originalBarangay != null &&
+                                      barangay != _originalBarangay &&
+                                      !hasImage;
 
-                          if (_editingReportId != null) {
-                            await _editIncidentReport(
-                              reportId: _editingReportId!,
-                              latitude: latitude,
-                              longitude: longitude,
-                              barangay: barangay,
-                              description: _descriptionController.text.trim(),
-                              newPhoto: _capturedImage,
-                              existingPhoto: _existingPhotoPath,
-                              context: context,
-                              webViewController: _webViewController,
-                            );
-                          } else {
-                            await _submitIncidentReport(
-                              latitude: latitude,
-                              longitude: longitude,
-                              barangay: barangay,
-                              description: _descriptionController.text.trim(),
-                              photo: _capturedImage!,
-                              context: context,
-                              webViewController: _webViewController,
-                            );
-                          }
+                                  if (!hasImage && isNewReport) {
+                                    await _showValidationDialog(
+                                      'Please take a photo.',
+                                    );
+                                    return;
+                                  }
+                                  if (!hasDescription) {
+                                    await _showValidationDialog(
+                                      'Please enter a description.',
+                                    );
+                                    return;
+                                  }
+                                  if (isBarangayChangedWithoutNewPhoto) {
+                                    await _showValidationDialog(
+                                      'Please take a new photo because the barangay was changed.',
+                                    );
+                                    return;
+                                  }
 
-                          if (mounted &&
-                              dialogContext != null &&
-                              Navigator.canPop(dialogContext!)) {
-                            Navigator.of(dialogContext!).pop();
-                          }
-                          _descriptionController.clear();
-                          setState(() {
-                            _capturedImage = null;
-                            _editingReportId = null;
-                            _existingPhotoPath = null;
-                            _originalBarangay = null;
-                          });
-                        },
-                        child: Text(
-                          _editingReportId != null ? "Update" : "Submit",
-                          style: GoogleFonts.montserrat(
-                            fontSize: 15,
-                            color: Colors.white,
+                                  Navigator.of(context).pop();
+                                  showDialog(
+                                    context: context,
+                                    barrierDismissible: false,
+                                    builder: (ctx) {
+                                      dialogContext = ctx;
+                                      return const Center(
+                                        child: CircularProgressIndicator(),
+                                      );
+                                    },
+                                  );
+
+                                  if (_editingReportId != null) {
+                                    await _editIncidentReport(
+                                      reportId: _editingReportId!,
+                                      latitude: latitude,
+                                      longitude: longitude,
+                                      barangay: barangay,
+                                      description: _descriptionController.text.trim(),
+                                      newPhoto: _capturedImage,
+                                      existingPhoto: _existingPhotoPath,
+                                      context: context,
+                                      webViewController: _webViewController,
+                                    );
+                                  } else {
+                                    await _submitIncidentReport(
+                                      latitude: latitude,
+                                      longitude: longitude,
+                                      barangay: barangay,
+                                      description: _descriptionController.text.trim(),
+                                      photo: _capturedImage!,
+                                      context: context,
+                                      webViewController: _webViewController,
+                                    );
+                                  }
+
+                                  if (mounted &&
+                                      dialogContext != null &&
+                                      Navigator.canPop(dialogContext!)) {
+                                    Navigator.of(dialogContext!).pop();
+                                  }
+
+                                  _descriptionController.clear();
+                                  setState(() {
+                                    _capturedImage = null;
+                                    _editingReportId = null;
+                                    _existingPhotoPath = null;
+                                    _originalBarangay = null;
+                                  });
+                              },
+                          child: Text(
+                            _editingReportId != null ? "Update" : "Submit",
+                            style: GoogleFonts.montserrat(
+                              fontSize: 15,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
@@ -673,18 +818,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     ).whenComplete(() {
       if (onClosed != null) onClosed();
       _webViewController?.evaluateJavascript(
-        source: "window.isIncidentFormOpen = false; window.removeGeolocateMarker && window.removeGeolocateMarker();"
+        source:
+            "window.isIncidentFormOpen = false; window.removeGeolocateMarker && window.removeGeolocateMarker();",
       );
+      if (_editingReportId == null) {
+        _descriptionController.clear();
+        setState(() {
+          _capturedImage = null;
+        });
+      }
     });
-
-    // This runs after the modal is closed (by swipe or submit/cancel)
-    // setState(() {
-    //   _isEditingLocation = false;
-    //   _editingReportId = null;
-    //   _existingPhotoPath = null;
-    //   _originalBarangay = null;
-    //   _editingDescription = null;
-    // });
   }
 
   @override
@@ -730,6 +873,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             },
             onWebViewCreated: (controller) {
               _webViewController = controller;
+              _controllerCompleter.complete(controller);
+
               controller.addJavaScriptHandler(
                 handlerName: 'onMapClick',
                 callback: (args) async {
