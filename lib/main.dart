@@ -1,6 +1,10 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'incident_map.dart';
+// import 'hazard_map.dart';
+// import 'incident_map.dart';
+import 'main_navigation_screen.dart';
 import 'local_server.dart';
 
 void main() async {
@@ -37,8 +41,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _controller = PageController();
   int _currentPage = 0;
   bool _showLogo = true;
-
   bool _showClose = false;
+  bool _hideOnboarding = false;
 
   @override
   void initState() {
@@ -88,6 +92,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_hideOnboarding) {
+      // Always return a blank page after closing onboarding
+      return const Scaffold(
+        backgroundColor: Colors.white, // or Colors.black
+        body: SizedBox.expand(),
+      );
+    }
     // Splash logo page
     if (_showLogo) {
       return Scaffold(
@@ -193,12 +204,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               top: 16,
               right: 16,
               child: GestureDetector(
-                onTap: () {
-                  Navigator.pushReplacement(
+                onTap: () async {
+                  setState(() => _hideOnboarding = true);
+                  await Future.delayed(const Duration(milliseconds: 300));
+                  if (!mounted) return;
+                  Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const QgisMapScreen(),
+                      builder: (context) => const MainNavigationScreen(),
                     ),
+                    (route) => false, // Remove all previous routes
                   );
                 },
                 child: Icon(Icons.close, color: Colors.grey[700], size: 28),
@@ -303,12 +318,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 top: 16,
                 right: 16,
                 child: GestureDetector(
-                  onTap: () {
-                    Navigator.pushReplacement(
+                  onTap: () async {
+                    setState(() => _hideOnboarding = true);
+                    await Future.delayed(const Duration(milliseconds: 300));
+                    if (!mounted) return;
+                    Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const QgisMapScreen(),
+                        builder: (context) => const MainNavigationScreen(),
                       ),
+                      (route) => false, // Remove all previous routes
                     );
                   },
                   child: Icon(Icons.close, color: Colors.grey[700], size: 28),
@@ -409,12 +428,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               top: 16,
               right: 16,
               child: GestureDetector(
-                onTap: () {
-                  Navigator.pushReplacement(
+                onTap: () async {
+                  setState(() => _hideOnboarding = true);
+                  await Future.delayed(const Duration(milliseconds: 300));
+                  if (!mounted) return;
+                  Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const QgisMapScreen(),
+                      builder: (context) => const MainNavigationScreen(),
                     ),
+                    (route) => false, // Remove all previous routes
                   );
                 },
                 child: Icon(Icons.close, color: Colors.grey[700], size: 28),
@@ -512,12 +535,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               top: 16,
               right: 16,
               child: GestureDetector(
-                onTap: () {
-                  Navigator.pushReplacement(
+                onTap: () async {
+                  setState(() => _hideOnboarding = true);
+                  await Future.delayed(const Duration(milliseconds: 300));
+                  if (!mounted) return;
+                  Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const QgisMapScreen(),
+                      builder: (context) => const MainNavigationScreen(),
                     ),
+                    (route) => false, // Remove all previous routes
                   );
                 },
                 child: Icon(Icons.close, color: Colors.grey[700], size: 28),

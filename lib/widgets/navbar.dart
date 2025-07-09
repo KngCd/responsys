@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
-import '../incident_map.dart';
-import '../hazard_map.dart';
+// import '../incident_map.dart';
+// import '../hazard_map.dart';
 
 enum NavPage { incident, hazard }
 
 class BottomNavBar extends StatelessWidget {
   final NavPage current;
   final BuildContext parentContext;
+  final void Function(int)? onNavTap;
+  final Future<void> Function()? onCleanup;
 
-  const BottomNavBar({super.key, required this.current, required this.parentContext});
+  const BottomNavBar({
+    super.key,
+    required this.current,
+    required this.parentContext,
+    this.onNavTap,
+    this.onCleanup,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -38,14 +46,16 @@ class BottomNavBar extends StatelessWidget {
               label: 'Incident Map',
               isActive: current == NavPage.incident,
               onTap: () {
-                if (current != NavPage.incident) {
-                  Navigator.pushAndRemoveUntil(
-                    parentContext,
-                    MaterialPageRoute(builder: (_) => const QgisMapScreen()),
-                    (route) => false,
-                  );
-                }
+                if (onNavTap != null) onNavTap!(0);
               },
+              // onTap: () {
+              //   Navigator.pushReplacement(
+              //     context,
+              //     MaterialPageRoute(
+              //       builder: (context) => const QgisMapScreen(),
+              //     ),
+              //   );
+              // },
               activeColor: activeColor,
               inactiveColor: inactiveColor,
             ),
@@ -54,14 +64,16 @@ class BottomNavBar extends StatelessWidget {
               label: 'Hazard Map',
               isActive: current == NavPage.hazard,
               onTap: () {
-                if (current != NavPage.hazard) {
-                  Navigator.pushAndRemoveUntil(
-                    parentContext,
-                    MaterialPageRoute(builder: (_) => const HazardMapScreen()),
-                    (route) => false,
-                  );
-                }
+                if (onNavTap != null) onNavTap!(1);
               },
+              // onTap: () {
+              //   Navigator.pushReplacement(
+              //     context,
+              //     MaterialPageRoute(
+              //       builder: (context) => const HazardMapScreen(),
+              //     ),
+              //   );
+              // },
               activeColor: activeColor,
               inactiveColor: inactiveColor,
             ),

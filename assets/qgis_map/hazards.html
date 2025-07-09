@@ -97,6 +97,17 @@
     </script>
 
 <script>
+        if (window.map && window.map.remove) {
+    map.off();
+    map.remove();
+}
+
+    window.addEventListener("beforeunload", function () {
+  if (map && map.remove) {
+    map.remove(); // Leaflet-specific cleanup
+  }
+});
+
 var highlightLayer;
 function highlightFeature(e) {
     highlightLayer = e.target;
@@ -236,48 +247,19 @@ var layer_OpenStreetMap_0 = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/
     attribution: '',
     minZoom: 13,
     maxZoom: 20,
-    maxNativeZoom: 19,              // Limit max native zoom
-    updateWhenIdle: true,           // Only update when map is idle
-    updateWhenZooming: false,       // Don't update while zooming
-    keepBuffer: 2,                  // Increased buffer for smoother panning
-    tileSize: 512,                  // Larger tiles = fewer requests
-    zoomOffset: -1,                 // Adjust zoom for larger tiles
-    crossOrigin: true,              // Enable tile caching
-    noWrap: true,                   // Prevent tile wrapping around globe
+    maxNativeZoom: 19,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    keepBuffer: 2,             // Increased buffer for smoother panning
+    tileSize: 512,            // Larger tiles = fewer requests
+    zoomOffset: -1,           // Adjust zoom for larger tiles
+    crossOrigin: true,        // Enable tile caching
+    noWrap: true,             // Prevent tile wrapping around globe
     subdomains: 'abc',
-    noWrap: true,
-    detectRetina: true,           // Better display on high DPI screens
-    preferCanvas: true,           // Use Canvas renderer for better performance
-    updateInterval: 200,          // Reduce update frequency
+    noWrap: true
 });
 // layer_OpenStreetMap_0;
 map.addLayer(layer_OpenStreetMap_0);
-
-function pop_PG_Brgy_Boundary_Cadastral_edited_1(feature, layer) {
-    layer.on({
-        mouseout: function(e) {
-            for (var i in e.target._eventParents) {
-                if (typeof e.target._eventParents[i].resetStyle === 'function') {
-                    e.target._eventParents[i].resetStyle(e.target);
-                }
-            }
-        },
-        mouseover: highlightFeature,
-    });
-    var popupContent = '<table>\
-            <tr>\
-                <td colspan="2">' + (feature.properties['Barangay'] !== null ? autolinker.link(String(feature.properties['Barangay']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-            </tr>\
-            <tr>\
-                <td colspan="2">' + (feature.properties['Area_ha'] !== null ? autolinker.link(String(feature.properties['Area_ha']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-            </tr>\
-        </table>';
-    var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-    layer.on('popupopen', function(e) {
-        addClassToPopupIfMedia(content, e.popup);
-    });
-    layer.bindPopup(content, { maxHeight: 400 });
-}
 
 function style_PG_Brgy_Boundary_Cadastral_edited_1_0() {
     return {
@@ -299,6 +281,7 @@ map.getPane('pane_PG_Brgy_Boundary_Cadastral_edited_1').style['mix-blend-mode'] 
 
 // Add this variable at the top of your file with other variables
 var activeBarangayLayer = null;
+var zoomTimeoutId = null;
 
 // Add this near the top of your file with other variables
 const HIGHLIGHT_STYLE = {
@@ -322,11 +305,11 @@ function zoomToBarangay(e, feature) {
     var bounds = layer.getBounds();
     
     // First pan to the clicked location
-    map.panTo(e.latlng, {
-        animate: true,
-        duration: 0.6,
-        easeLinearity: 0.25
-    });
+    // map.panTo(e.latlng, {
+    //     animate: true,
+    //     duration: 0.6,
+    //     easeLinearity: 0.25
+    // });
 
     // Then after pan completes, fly to the bounds
     setTimeout(() => {
@@ -389,7 +372,6 @@ var layer_PG_Brgy_Boundary_Cadastral_edited_1 = new L.geoJson(json_PG_Brgy_Bound
 
                 var lat = e.latlng.lat;
                 var lng = e.latlng.lng;
-                var streetViewUrl = `https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`;
 
                 L.popup()
                     .setLatLng(e.latlng)
@@ -416,8 +398,8 @@ function style_Buildings_2_0() {
         fill: true,
         fillOpacity: 1,
         fillColor: 'rgba(190,178,151,1.0)',
-        interactive: true,
-        clickable: true,
+        interactive: false,
+        clickable: false,
     }
 }
 map.createPane('pane_Buildings_2');
@@ -426,7 +408,7 @@ map.getPane('pane_Buildings_2').style['mix-blend-mode'] = 'normal';
 
 var layer_Buildings_2 = new L.geoJson(json_Buildings_2, {
     attribution: '',
-    interactive: true,
+    interactive: false,
     dataVar: 'json_Buildings_2',
     layerName: 'layer_Buildings_2',
     pane: 'pane_Buildings_2',
@@ -450,15 +432,6 @@ layer_PG_Brgy_Boundary_Cadastral_edited_1.eachLayer(function(layer) {
         addLabel(layer, i);
         i++;
 });
-
-// map.addControl(new L.Control.Search({
-//     layer: layer_Buildings_2,
-//     initial: false,
-//     hideMarkerOnCollapse: true,
-//     propertyName: 'name',
-// }));
-// document.getElementsByClassName('search-button')[0].className +=
-//     ' fa fa-search';
 
 var searchMarker = null;
 const searchInput = document.getElementById('search-input');
@@ -588,14 +561,6 @@ map.createPane('hazardPane');
 map.getPane('hazardPane').style.zIndex = 450;
 map.getPane("hazardPane").style.pointerEvents = "all";
 
-// Hazard colors mapping
-var hazardColors = {
-    "fire": "red",
-    "flood": "blue",
-    "earthquake": "orange",
-    "landslide": "brown"
-};
-
 // Function to fetch hazards
 function fetchHazards() {
     fetch("http://192.168.1.7/Capstone-MDRRMO/php/hazards/fetch_citizen_hazards.php")   
@@ -647,19 +612,14 @@ function fetchHazards() {
                 updateAllLegends();
             }
 
-            // Poll for new hazards every 2 mins
-            setTimeout(fetchHazards, 10000);
+            // Poll for new hazards
+            setTimeout(fetchHazards, 2000);
         })
         .catch((error) => {
             console.error("Error fetching hazards:", error);
             setTimeout(fetchHazards, 3000);
     });
 }
-
-// Create hazard pane
-map.createPane('hazardPane');
-map.getPane('hazardPane').style.zIndex = 450;
-map.getPane("hazardPane").style.pointerEvents = "all";
 
 // Hazard colors mapping
 var hazardColors = {
@@ -722,6 +682,33 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('loader_container').classList.add('loader_hidden');
         clearInterval(loadingCheck);
     }, 5000);
+});
+
+// Cleanup on unload
+window.addEventListener('unload', function() {
+    if (window.map && window.map.remove) {
+        window.map.off();
+        window.map.remove();
+        window.map = null;
+    }
+
+    // Clear all intervals/timeouts
+    let id = window.setTimeout(function() {}, 0);
+    while (id--) window.clearTimeout(id);
+    let intervalId = window.setInterval(function() {}, 0);
+    while (intervalId--) window.clearInterval(intervalId);
+
+    // Disconnect ResizeObserver
+    if (window.resizeObserver && window.resizeObserver.disconnect) {
+        window.resizeObserver.disconnect();
+        window.resizeObserver = null;
+    }
+
+    // Disconnect MutationObserver
+    if (window.observer && window.observer.disconnect) {
+        window.observer.disconnect();
+        window.observer = null;
+    }
 });
 </script>
 </body>

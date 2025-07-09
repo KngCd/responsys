@@ -46,14 +46,6 @@
       </div> -->
     </div>
 
-    <script>
-        document.getElementById('warning-icon').onclick = function () {
-            if (window.flutter_inappwebview) {
-                window.flutter_inappwebview.callHandler('onWarningIconClick');
-            }
-        };
-    </script>
-
     <div id="search-suggestions" class="search-suggestions"></div>
 
     <!-- Scripts -->
@@ -105,6 +97,10 @@
     </script>
 
 <script>
+    // Called by Flutter after submit/edit to trigger reload
+    window.setFlutterReports = function() {
+        loadUserReports();
+    };
     var highlightLayer;
     function highlightFeature(e) {
         highlightLayer = e.target;
@@ -189,7 +185,6 @@
     var userLayer = L.layerGroup().addTo(map); // Layer for user-added markers
     var selectedLatLng = null; // Store clicked location
     var hash = new L.Hash(map);
-    var lastClickedBarangay = null; // Store the last barangay clicked
 
     map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
     var autolinker = new Autolinker({ truncate: { length: 30, location: 'smart' } });
@@ -264,32 +259,6 @@
     // layer_OpenStreetMap_0;
     map.addLayer(layer_OpenStreetMap_0);
 
-    function pop_PG_Brgy_Boundary_Cadastral_edited_1(feature, layer) {
-        layer.on({
-            mouseout: function (e) {
-                for (var i in e.target._eventParents) {
-                    if (typeof e.target._eventParents[i].resetStyle === 'function') {
-                        e.target._eventParents[i].resetStyle(e.target);
-                    }
-                }
-            },
-            mouseover: highlightFeature,
-        });
-        var popupContent = '<table>\
-        <tr>\
-            <td colspan="2">' + (feature.properties['Barangay'] !== null ? autolinker.link(String(feature.properties['Barangay']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-        </tr>\
-        <tr>\
-            <td colspan="2">' + (feature.properties['Area_ha'] !== null ? autolinker.link(String(feature.properties['Area_ha']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
-        </tr>\
-    </table>';
-        var content = removeEmptyRowsFromPopupContent(popupContent, feature);
-        layer.on('popupopen', function (e) {
-            addClassToPopupIfMedia(content, e.popup);
-        });
-        layer.bindPopup(content, { maxHeight: 400 });
-    }
-
     function style_PG_Brgy_Boundary_Cadastral_edited_1_0() {
         return {
             pane: 'pane_PG_Brgy_Boundary_Cadastral_edited_1',
@@ -308,10 +277,7 @@
     map.getPane('pane_PG_Brgy_Boundary_Cadastral_edited_1').style.zIndex = 401;
     map.getPane('pane_PG_Brgy_Boundary_Cadastral_edited_1').style['mix-blend-mode'] = 'normal';
     map.getPane('pane_PG_Brgy_Boundary_Cadastral_edited_1').style.willChange = 'transform';
-
-    // Add this variable at the top of your file with other variables
-    var activeBarangayLayer = null;
-
+    
     // Add this near the top of your file with other variables
     const HIGHLIGHT_STYLE = {
         transform: 'translate3d(0,0,0)',
@@ -321,35 +287,56 @@
         weight: 2
     };
 
-    function zoomToBarangay(e, feature) {
+    // Add this variable at the top of your file with other variables
+    var activeBarangayLayer = null;
+    var lastClickedBarangay = null; // Store the last barangay clicked
+    var zoomTimeoutId = null;       // To manage delayed form display
+    let suppressGlobalClick = false; // Flag to suppress global click events
+
+    function showIncidentFormAfterZoom(lat, lng, barangay) {
+        if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('onMapClick', lat, lng, barangay);
+        }
+    }
+
+    function zoomToBarangay(e, feature, callback) {
         var barangayName = feature.properties.Barangay || "Unknown Barangay";
         var layer = e.target;
+        var lat = e.latlng.lat;
+        var lng = e.latlng.lng;
 
         if (lastClickedBarangay === barangayName) {
-            console.log("Already zoomed to this barangay, ignoring.");
-            return;
+            console.log("Already zoomed to this barangay, but will still show form once.");
         }
 
         lastClickedBarangay = barangayName;
         var bounds = layer.getBounds();
 
-        // First pan to the clicked location
         map.panTo(e.latlng, {
             animate: true,
             duration: 0.6,
             easeLinearity: 0.25
         });
 
-        // Then after pan completes, fly to the bounds
-        setTimeout(() => {
+        // Clear any existing timeout to avoid stacking
+        if (zoomTimeoutId) clearTimeout(zoomTimeoutId);
+
+        zoomTimeoutId = setTimeout(() => {
             map.flyToBounds(bounds, {
                 padding: [50, 50],
                 maxZoom: 16,
                 animate: true,
-                duration: 0.6,       // Keep short so it feels like one flow
+                duration: 0.6,
                 easeLinearity: 0.3
             });
-        }, 100); // Match delay to pan duration
+
+            // Delay the form call slightly after zoom to avoid race condition
+            setTimeout(() => {
+                if (typeof callback === 'function') {
+                    callback(lat, lng, barangayName);
+                }
+            }, 300); // allow zoom animation to finish
+        }, 100);
     }
 
     // Handle Barangay Boundary Clicks
@@ -382,6 +369,7 @@
                     }
                 },
                 click: function (e) {
+                    suppressGlobalClick = true;
                     console.log("Barangay clicked at:", e.latlng);
 
                     // Reset previous active barangay
@@ -393,7 +381,7 @@
                     activeBarangayLayer = layer;
                     layer.setStyle(HIGHLIGHT_STYLE);
 
-                    zoomToBarangay(e, feature);
+                    zoomToBarangay(e, feature, showIncidentFormAfterZoom);
 
                     var lat = e.latlng.lat;
                     var lng = e.latlng.lng;
@@ -403,8 +391,8 @@
                     L.popup()
                         .setLatLng(e.latlng)
                         .setContent(`
-                    <b>Barangay:</b> ${feature.properties.Barangay || "Unknown Barangay"}<br>
-                `)
+                        <b>Barangay:</b> ${feature.properties.Barangay || "Unknown Barangay"}<br>
+                    `)
                         .openOn(map);
                 }
             });
@@ -425,8 +413,8 @@
             fill: true,
             fillOpacity: 1,
             fillColor: 'rgba(190,178,151,1.0)',
-            interactive: true,
-            clickable: true,
+            interactive: false,
+            clickable: false,
         }
     }
     map.createPane('pane_Buildings_2');
@@ -435,7 +423,7 @@
 
     var layer_Buildings_2 = new L.geoJson(json_Buildings_2, {
         attribution: '',
-        interactive: true,
+        interactive: false,
         dataVar: 'json_Buildings_2',
         layerName: 'layer_Buildings_2',
         pane: 'pane_Buildings_2',
@@ -695,6 +683,11 @@
     };
 
     map.on('click', function (e) {
+        if (suppressGlobalClick) {
+            suppressGlobalClick = false;  // Reset after suppression
+            return;
+        }
+
         var lat = e.latlng.lat;
         var lng = e.latlng.lng;
         // var foundBarangay = null;
@@ -739,6 +732,11 @@
     
     // Update the locate control to show form when location is inside boundary
     // --- BEGIN: Robust Incident Report Logic (from report_incidents.js) ---
+    
+    // Called by Flutter after submit/edit to trigger reload
+    // window.setFlutterReports = function() {
+    //     loadUserReports();
+    // };
 
     window.activeMarkers = new Map();
 
@@ -873,11 +871,6 @@
             });
     }
     
-    // Called by Flutter after submit/edit to trigger reload
-    window.setFlutterReports = function() {
-        loadUserReports();
-    };
-    
     // On page load and every 3 seconds, sync and display
     document.addEventListener('DOMContentLoaded', loadUserReports);
     setInterval(loadUserReports, 3000);
@@ -922,6 +915,32 @@
             document.getElementById('loader_container').classList.add('loader_hidden');
             clearInterval(loadingCheck);
         }, 5000);
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('unload', function() {
+        if (window.map && window.map.remove) {
+            window.map.off();
+            window.map.remove();
+            window.map = null;
+        }
+        // Clear all intervals/timeouts
+        let id = window.setTimeout(function() {}, 0);
+        while (id--) window.clearTimeout(id);
+        let intervalId = window.setInterval(function() {}, 0);
+        while (intervalId--) window.clearInterval(intervalId);
+
+        // Disconnect ResizeObserver
+        if (window.resizeObserver && window.resizeObserver.disconnect) {
+            window.resizeObserver.disconnect();
+            window.resizeObserver = null;
+        }
+
+        // Disconnect MutationObserver
+        if (window.observer && window.observer.disconnect) {
+            window.observer.disconnect();
+            window.observer = null;
+        }
     });
 </script>
 </body>

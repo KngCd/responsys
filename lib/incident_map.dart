@@ -17,9 +17,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'main.dart';
 import 'hazard_map.dart';
-import 'widgets/navbar.dart';
+// import 'widgets/navbar.dart';
 
 class QgisMapScreen extends StatefulWidget {
+  static bool forceReloadOnNextBuild = false;
   const QgisMapScreen({super.key});
 
   @override
@@ -27,14 +28,16 @@ class QgisMapScreen extends StatefulWidget {
 }
 
 class _QgisMapScreenState extends State<QgisMapScreen> {
-  final server = InAppLocalhostServer(documentRoot: 'assets/qgis_map');
+  // final server = InAppLocalhostServer(documentRoot: 'assets/qgis_map');
+  bool _isWebViewLoading = true; 
   InAppWebViewController? _webViewController;
   final Completer<InAppWebViewController> _controllerCompleter = Completer<InAppWebViewController>();
+  Completer<void>? _cleanupCompleter;
 
   File? _capturedImage;
   final TextEditingController _descriptionController = TextEditingController();
   BuildContext? dialogContext;
-  Timer? _syncTimer;
+  // Timer? _syncTimer;
 
   // For editing
   int? _editingReportId;
@@ -155,27 +158,33 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     return "Unknown Barangay";
   }
 
-  Future<void> _openCamera(Function(File) onImagePicked) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 80,
-    );
-
-    if (pickedFile != null) {
-      final file = File(pickedFile.path);
-
-      // Get barangay from map instead of native geolocation
-      final barangayFromLeaflet = await _getBarangayFromLeaflet();
-
-      final watermarkedFile = await addWatermarkToImage(
-        file,
-        barangayFromLeaflet,
+  Future<void> _openCamera(Function(File?) onImagePicked) async {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
       );
 
-      onImagePicked(watermarkedFile);
+      if (pickedFile != null) {
+        final file = File(pickedFile.path);
+
+        String? barangayFromLeaflet = await _getBarangayFromLeaflet();
+
+        // Use fallback if leaflet fails
+        if (barangayFromLeaflet == null || barangayFromLeaflet.isEmpty) {
+          barangayFromLeaflet = 'No location detected';
+        }
+
+        final watermarkedFile = await addWatermarkToImage(
+          file,
+          barangayFromLeaflet,
+        );
+
+        onImagePicked(watermarkedFile);
+      } else {
+        onImagePicked(null); // cancelled
+      }
     }
-  }
 
   Future<void> _editIncidentReport({
     required int reportId,
@@ -285,20 +294,45 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     }
   }
   
+  Future<void> cleanupWebView() async {
+    try {
+      await _webViewController?.evaluateJavascript(
+        source: """
+        if (window.map && window.map.remove) {
+          window.map.off();
+          window.map.remove();
+          window.map = null;
+        }
+        let id = window.setTimeout(function() {}, 0);
+        while (id--) window.clearTimeout(id);
+        let intervalId = window.setInterval(function() {}, 0);
+        while (intervalId--) window.clearInterval(intervalId);
+        """,
+      );
+      _cleanupCompleter = Completer<void>();
+      await _webViewController?.loadUrl(
+        urlRequest: URLRequest(url: WebUri("about:blank")),
+      );
+      // Wait for onLoadStop to complete the completer
+      await _cleanupCompleter!.future.timeout(const Duration(seconds: 2), onTimeout: () {});
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
     _requestLocationPermission();
     fetchAndSyncReportsFromServer();
-    // refresh every 2 seconds
-    _syncTimer = Timer.periodic(Duration(seconds: 2), (timer) {
-      fetchAndSyncReportsFromServer();
-    });
+    // Increase interval to 10 seconds
+    // _syncTimer = Timer.periodic(Duration(seconds: 10), (timer) {
+    //   fetchAndSyncReportsFromServer();
+    // });
   }
 
   @override
   void dispose() {
-    _syncTimer?.cancel();
+    cleanupWebView();
+    //  _syncTimer?.cancel();
     _webViewController = null; // Prevent further use
     super.dispose();
   }
@@ -438,6 +472,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      useRootNavigator: true, // smoother drag/animation
       builder: (context) => Padding(
         padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -534,84 +569,88 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                       child: Column(
                         children: [
-                          if (isPhotoLoading)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 20),
-                              child: CircularProgressIndicator(),
-                            )
-                          else if (_capturedImage != null)
-                            Stack(
-                              alignment: Alignment.topRight,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.file(
-                                    _capturedImage!,
-                                    width: 180,
-                                    height: 180,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 4,
-                                  right: 4,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setModalState(() {
-                                        _capturedImage = null;
-                                      });
-                                      setState(() {
-                                        _capturedImage = null;
-                                      });
-                                    },
-                                    child: Container(
-                                      decoration: const BoxDecoration(
-                                        color: Colors.black54,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      padding: const EdgeInsets.all(4),
-                                      child: const Icon(
-                                        Icons.close,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            )
-                          else if ((_existingPhotoPath ?? '').isNotEmpty)
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.network(
-                                (() {
-                                  if (_existingPhotoPath!.startsWith('http')) {
-                                    return _existingPhotoPath!;
-                                  } else if (_existingPhotoPath!.startsWith(
-                                    'images/',
-                                  )) {
-                                    return 'http://192.168.1.7/Capstone-MDRRMO/${_existingPhotoPath!}';
-                                  } else {
-                                    return 'http://192.168.1.7/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
-                                  }
-                                })(),
-                                width: 180,
-                                height: 180,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) =>
-                                    const Icon(
-                                      Icons.broken_image,
-                                      size: 40,
-                                      color: Colors.red,
-                                    ),
-                              ),
-                            )
-                          else
-                            const Icon(
-                              Icons.camera_alt,
-                              size: 40,
-                              color: Colors.black54,
-                            ),
+                          AnimatedSwitcher(
+                            duration: Duration(milliseconds: 250),
+                            child: isPhotoLoading
+                                ? const Padding(
+                                    key: ValueKey('loading'),
+                                    padding: EdgeInsets.symmetric(vertical: 20),
+                                    child: CircularProgressIndicator(),
+                                  )
+                                : _capturedImage != null
+                                    ? Stack(
+                                        key: ValueKey('image'),
+                                        alignment: Alignment.topRight,
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(12),
+                                            child: Image.file(
+                                              _capturedImage!,
+                                              width: 180,
+                                              height: 180,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                setModalState(() {
+                                                  _capturedImage = null;
+                                                });
+                                                setState(() {
+                                                  _capturedImage = null;
+                                                });
+                                              },
+                                              child: Container(
+                                                decoration: const BoxDecoration(
+                                                  color: Colors.black54,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                padding: const EdgeInsets.all(4),
+                                                child: const Icon(
+                                                  Icons.close,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : (_existingPhotoPath ?? '').isNotEmpty
+                                        ? ClipRRect(
+                                            key: ValueKey('network'),
+                                            borderRadius: BorderRadius.circular(12),
+                                            child: Image.network(
+                                              (() {
+                                                if (_existingPhotoPath!.startsWith('http')) {
+                                                  return _existingPhotoPath!;
+                                                } else if (_existingPhotoPath!.startsWith('images/')) {
+                                                  return 'http://192.168.1.7/Capstone-MDRRMO/${_existingPhotoPath!}';
+                                                } else {
+                                                  return 'http://192.168.1.7/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
+                                                }
+                                              })(),
+                                              width: 180,
+                                              height: 180,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) =>
+                                                  const Icon(
+                                                    Icons.broken_image,
+                                                    size: 40,
+                                                    color: Colors.red,
+                                                  ),
+                                            ),
+                                          )
+                                        : const Icon(
+                                            key: ValueKey('icon'),
+                                            Icons.camera_alt,
+                                            size: 40,
+                                            color: Colors.black54,
+                                          ),
+                          ),
                           const SizedBox(height: 8),
                           ElevatedButton.icon(
                             icon: const Icon(
@@ -635,14 +674,20 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                             ),
                             onPressed: () async {
                               setModalState(() => isPhotoLoading = true);
+                              await Future.microtask(() {}); // let spinner show
                               await _openCamera((file) {
-                                setModalState(() {
-                                  _capturedImage = file;
-                                  isPhotoLoading = false;
-                                });
-                                setState(() {
-                                  _capturedImage = file;
-                                });
+                                if (!mounted) return;
+                                if (file != null) {
+                                  setModalState(() {
+                                    _capturedImage = file;
+                                    isPhotoLoading = false;
+                                  });
+                                  setState(() {
+                                    _capturedImage = file;
+                                  });
+                                } else {
+                                  setModalState(() => isPhotoLoading = false);
+                                }
                               });
                             },
                           ),
@@ -832,6 +877,12 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // If the static flag is set, reload the WebView
+    if (QgisMapScreen.forceReloadOnNextBuild && _webViewController != null) {
+      QgisMapScreen.forceReloadOnNextBuild = false;
+      _webViewController?.reload();
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Incident Map"),
@@ -851,7 +902,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
         tooltip: "Reload Map",
         child: const Icon(Icons.refresh),
       ),
-            body: Stack(
+      body: Stack(
         children: [
           InAppWebView(
             onConsoleMessage: (controller, consoleMessage) {
@@ -873,7 +924,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             },
             onWebViewCreated: (controller) {
               _webViewController = controller;
-              _controllerCompleter.complete(controller);
+
+              if (!_controllerCompleter.isCompleted) {
+                _controllerCompleter.complete(controller);
+              }
+
+              // Force reload if coming from navbar navigation
+              if (QgisMapScreen.forceReloadOnNextBuild) {
+                QgisMapScreen.forceReloadOnNextBuild = false;
+                controller.reload();
+              }
 
               controller.addJavaScriptHandler(
                 handlerName: 'onMapClick',
@@ -989,6 +1049,28 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                 },
               );
             },
+            onLoadStart: (controller, url) {
+              setState(() {
+                _isWebViewLoading = true;
+              });
+            },
+            onLoadStop: (controller, url) {
+              if (_cleanupCompleter != null &&
+                  !_cleanupCompleter!.isCompleted &&
+                  url.toString() == "about:blank") {
+                _cleanupCompleter!.complete();
+              }
+
+              setState(() {
+                _isWebViewLoading = false;
+              });
+            },
+          ),
+          if (_isWebViewLoading)
+            Positioned.fill(
+              child: Container(
+                color: Colors.white, // Just a blank white overlay
+              ),
           ),
           if (_isEditingLocation)
             Positioned(
@@ -1028,10 +1110,11 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             ),
         ],
       ),
-      bottomNavigationBar: BottomNavBar(
-        current: NavPage.incident,
-        parentContext: context,
-      ),
+      // bottomNavigationBar: BottomNavBar(
+      //   current: NavPage.incident,
+      //   parentContext: context,
+      //   onCleanup: cleanupWebView,
+      // ),
     );
   }
 }
