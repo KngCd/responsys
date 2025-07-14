@@ -506,7 +506,10 @@ searchInput.addEventListener('input', function() {
         div.onclick = function() {
             searchInput.value = b.name;
             suggestionsBox.style.display = 'none';
-            map.fitBounds(b.layer.getBounds ? b.layer.getBounds() : b.layer.getLatLng().toBounds(100));
+
+            const bounds = b.layer.getBounds ? b.layer.getBounds() : b.layer.getLatLng().toBounds(100);
+            map.fitBounds(bounds, { maxZoom: 17 });            
+    
             b.layer.openPopup && b.layer.openPopup();
             b.layer.setStyle && b.layer.setStyle({color: '#232A67', weight: 3});
             // --- Add red pinpoint marker ---
@@ -563,7 +566,7 @@ map.getPane("hazardPane").style.pointerEvents = "all";
 
 // Function to fetch hazards
 function fetchHazards() {
-    fetch("http://192.168.1.7/Capstone-MDRRMO/php/hazards/fetch_citizen_hazards.php")   
+    fetch("http://192.168.1.10/Capstone-MDRRMO/php/hazards/fetch_citizen_hazards.php")   
         .then((response) => {
             if (!response.ok) throw new Error("Network response was not ok");
             return response.json();

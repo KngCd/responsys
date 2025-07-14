@@ -9,7 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:permission_handler/permission_handler.dart';
-// import 'package:geolocator/geolocator.dart';
+import 'package:geolocator/geolocator.dart';
 // import 'package:geocoding/geocoding.dart'; 
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
@@ -45,6 +45,28 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   String? _originalBarangay;
   String? _editingDescription;
   bool _isEditingLocation = false;
+
+  Future<bool> checkLocationServicesEnabled(BuildContext context) async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // Show dialog to prompt user to enable location
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Location Disabled'),
+          content: Text('Please enable location services in your device settings.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
 
   // Robustly save report locally and update map
   Future<void> saveReportLocally(Map<String, dynamic> reportData) async {
@@ -140,51 +162,106 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   Future<String> _getBarangayFromLeaflet() async {
     try {
       final controller = await _controllerCompleter.future;
-
       final result = await controller.callAsyncJavaScript(
         functionBody: "return window.resolveBarangayViaHiddenLocate();",
       );
 
-      if (result != null && result.value is String) {
-        final value = result.value?.toString().trim();
-        if (value != null && value.isNotEmpty) {
-          return value;
-        }
-      }
-    } catch (e) {
-      debugPrint("❌ Failed to get barangay from Leaflet: $e");
-    }
+      final dynamic value = result?.value;
+      debugPrint("🟡 JS returned: $value");
 
-    return "Unknown Barangay";
+      if (value == null) {
+        return "NO_GPS";
+      }
+
+      final trimmed = value.toString().trim();
+
+      debugPrint("Barangay result from JS: $trimmed");
+
+      return trimmed.isEmpty ? "NO_GPS" : trimmed;
+    } catch (e) {
+      debugPrint("❌ JS geolocation failed: $e");
+      return "NO_GPS";
+    }
   }
 
   Future<void> _openCamera(Function(File?) onImagePicked) async {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 80,
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80,
+    );
+
+    if (pickedFile == null) {
+      onImagePicked(null); // User cancelled
+      return;
+    }
+
+    final file = File(pickedFile.path);
+    final barangay = await _getBarangayFromLeaflet();
+
+    if (!mounted) return; // Safety check
+
+    if (barangay == 'NO_GPS') {
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Location Required'),
+          content: const Text(
+            'Location is required to take a photo. Please turn on your device\'s location (GPS) and try again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Geolocator.openLocationSettings();
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Open Settings'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
       );
 
-      if (pickedFile != null) {
-        final file = File(pickedFile.path);
-
-        String? barangayFromLeaflet = await _getBarangayFromLeaflet();
-
-        // Use fallback if leaflet fails
-        if (barangayFromLeaflet == null || barangayFromLeaflet.isEmpty) {
-          barangayFromLeaflet = 'No location detected';
-        }
-
-        final watermarkedFile = await addWatermarkToImage(
-          file,
-          barangayFromLeaflet,
-        );
-
-        onImagePicked(watermarkedFile);
-      } else {
-        onImagePicked(null); // cancelled
+      if (mounted) {
+        Navigator.of(context).pop(); // Close form sheet
       }
+
+      onImagePicked(null);
+      return;
     }
+
+    if (barangay == 'OUTSIDE_BOUNDARY') {
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Outside Boundary'),
+          content: const Text(
+            'You are outside the Padre Garcia boundary. Please move inside the area to take a photo and submit a report.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop(); // Close form sheet
+      }
+
+      onImagePicked(null);
+      return;
+    }
+
+    // Valid barangay
+    final watermarkedFile = await addWatermarkToImage(file, barangay);
+    onImagePicked(watermarkedFile);
+  }
 
   Future<void> _editIncidentReport({
     required int reportId,
@@ -199,7 +276,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   }) async {
     final String timeNow = TimeOfDay.now().format(context);
     final uri = Uri.parse(
-      'http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
+      'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
     );
     final request = http.MultipartRequest('POST', uri)
       ..fields['report_id'] = reportId.toString()
@@ -248,7 +325,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             icon: 'success',
             title: "Report updated successfully!",
             showConfirmButton: false,
-            timer: 2000,
+            timer: 1500,
             timerProgressBar: true,
             customClass: { popup: 'swal2-geo-tooltip' }
         });
@@ -272,7 +349,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             icon: 'error',
             title: "Failed to update report.",
             showConfirmButton: false,
-            timer: 2000,
+            timer: 1500,
             timerProgressBar: true,
             customClass: { popup: 'swal2-geo-tooltip' }
         });
@@ -282,15 +359,33 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   }
 
   Future<void> fetchAndSyncReportsFromServer() async {
-    final prefs = await SharedPreferences.getInstance();
-    final response = await http.get(
-      Uri.parse('http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php'),
-    );
-    if (response.statusCode == 200) {
-      final List reports = jsonDecode(response.body);
-      // Only keep active and not deleted in localStorage, but keep all for reference
-      await prefs.setString('citizenReports', jsonEncode(reports));
-      await sendLocalReportsToWebView();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final response = await http.get(
+        Uri.parse('http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php'),
+      );
+      if (response.statusCode == 200) {
+        final List reports = jsonDecode(response.body);
+        // Only keep active and not deleted in localStorage, but keep all for reference
+        await prefs.setString('citizenReports', jsonEncode(reports));
+        await sendLocalReportsToWebView();
+      }
+    } catch (e) {
+      _webViewController?.evaluateJavascript(
+        source: """
+          Swal.fire({
+            toast: true,
+            position: 'top',
+            icon: 'error',
+            title: "Could not connect to the server",
+            text: "${e.runtimeType}: ${e.toString().replaceAll('"', "'").replaceAll('\n', ' ')}",
+            showConfirmButton: false,
+            timer: 1500,
+            timerProgressBar: true,
+            customClass: { popup: 'swal2-geo-tooltip' }
+          });
+        """,
+      );
     }
   }
   
@@ -339,6 +434,39 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
 
   Future<void> _requestLocationPermission() async {
     await Permission.location.request();
+    await _ensureLocationServiceEnabled();
+  }
+  
+  Future<void> _ensureLocationServiceEnabled() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    while (!serviceEnabled && mounted) {
+      if (!mounted) return;
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogCtx) => AlertDialog(
+          title: const Text('Location Required'),
+          content: const Text('Please enable location services (GPS) in your device settings to use this app.'),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Geolocator.openLocationSettings();
+                Navigator.pop(dialogCtx, true);
+              },
+              child: const Text('Open Settings'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogCtx, false);
+              },
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+      if (result != true) break; // User cancelled
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    }
   }
 
   Future<void> deleteReportLocally(int reportId) async {
@@ -365,76 +493,128 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   }
 
   Future<void> _submitIncidentReport({
-    required double latitude,
-    required double longitude,
-    required String barangay,
-    required String description,
-    required File photo,
-    required BuildContext context,
-    required InAppWebViewController? webViewController,
-  }) async {
-    final uri = Uri.parse(
-      'http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
-    );
-    final request = http.MultipartRequest('POST', uri)
-      ..fields['latitude'] = latitude.toString()
-      ..fields['longitude'] = longitude.toString()
-      ..fields['description'] = description
-      ..fields['barangay'] = barangay
-      ..files.add(await http.MultipartFile.fromPath('photoData', photo.path));
-
-    final response = await request.send();
-
-    if (!mounted) return;
-
-    if (response.statusCode == 200) {
-      final respStr = await response.stream.bytesToString();
-      final data = jsonDecode(respStr);
-      await saveReportLocally({
-        'id': data['report_id'],
-        'latitude': data['latitude'],
-        'longitude': data['longitude'],
-        'description': data['description'],
-        'barangay': data['barangay'],
-        'photo': data['photo'],
-        'status': data['status'],
-        'date': data['date'],
-        'time': data['time'],
-      });
-      await sendLocalReportsToWebView();
-      await fetchAndSyncReportsFromServer();
-      await _webViewController?.evaluateJavascript(
-        source: """
-          window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
-          window.setFlutterReports && window.setFlutterReports();
-          Swal.fire({
-              toast: true,
-              position: 'top',
-              icon: 'success',
-              title: "Report added successfully!",
-              showConfirmButton: false,
-              timer: 2000,
-              timerProgressBar: true,
-              customClass: { popup: 'swal2-geo-tooltip' }
+      required double latitude,
+      required double longitude,
+      required String barangay,
+      required String description,
+      required File photo,
+      required BuildContext context,
+      required InAppWebViewController? webViewController,
+    }) async {
+      // Check if location services are enabled before submitting
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!mounted) return;
+      if (!serviceEnabled) {
+        // Prompt user to enable location
+        await showDialog(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Location Required'),
+            content: const Text(
+              'Please enable location services (GPS) in your device settings to submit a report.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  await Geolocator.openLocationSettings();
+                  Navigator.pop(dialogCtx);
+                },
+                child: const Text('Open Settings'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogCtx);
+                },
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        );
+        return; // Cancel submission
+      }
+    
+      try {
+        final uri = Uri.parse(
+          'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
+        );
+        final request = http.MultipartRequest('POST', uri)
+          ..fields['latitude'] = latitude.toString()
+          ..fields['longitude'] = longitude.toString()
+          ..fields['description'] = description
+          ..fields['barangay'] = barangay
+          ..files.add(await http.MultipartFile.fromPath('photoData', photo.path));
+    
+        final response = await request.send();
+    
+        if (!mounted) return;
+    
+        if (response.statusCode == 200) {
+          final respStr = await response.stream.bytesToString();
+          final data = jsonDecode(respStr);
+          await saveReportLocally({
+            'id': data['report_id'],
+            'latitude': data['latitude'],
+            'longitude': data['longitude'],
+            'description': data['description'],
+            'barangay': data['barangay'],
+            'photo': data['photo'],
+            'status': data['status'],
+            'date': data['date'],
+            'time': data['time'],
           });
-        """,
-      );
-    } else {
-      webViewController?.evaluateJavascript(
-        source: """
-        Swal.fire({
-            toast: true,
-            position: 'top',
-            icon: 'error',
-            title: "Failed to add report.",
-            showConfirmButton: false,
-            timer: 2000,
-            timerProgressBar: true,
-            customClass: { popup: 'swal2-geo-tooltip' }
-        });
-      """,
-      );
-    }
+          await sendLocalReportsToWebView();
+          await fetchAndSyncReportsFromServer();
+          await _webViewController?.evaluateJavascript(
+            source: """
+              window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
+              window.setFlutterReports && window.setFlutterReports();
+              Swal.fire({
+                  toast: true,
+                  position: 'top',
+                  icon: 'success',
+                  title: "Report added successfully!",
+                  showConfirmButton: false,
+                  timer: 1500,
+                  timerProgressBar: true,
+                  customClass: { popup: 'swal2-geo-tooltip' }
+              });
+            """,
+          );
+        } else {
+          webViewController?.evaluateJavascript(
+            source: """
+            Swal.fire({
+                toast: true,
+                position: 'top',
+                icon: 'error',
+                title: "Failed to add report.",
+                showConfirmButton: false,
+                timer: 1500,
+                timerProgressBar: true,
+                customClass: { popup: 'swal2-geo-tooltip' }
+            });
+          """,
+          );
+        }
+      } catch (e){
+          if (dialogContext != null && Navigator.canPop(dialogContext!)) {
+            Navigator.of(dialogContext!).pop();
+          }
+          webViewController?.evaluateJavascript(
+            source: """
+              Swal.fire({
+                  toast: true,
+                  position: 'top',
+                  icon: 'error',
+                  title: "Could not connect to the server",
+                  showConfirmButton: false,
+                  timer: 1500,
+                  timerProgressBar: true,
+                  customClass: { popup: 'swal2-geo-tooltip' }
+              });
+            """,
+          );
+      }
   }
 
   Future<void> _showValidationDialog(String message) async {
@@ -628,9 +808,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                                                 if (_existingPhotoPath!.startsWith('http')) {
                                                   return _existingPhotoPath!;
                                                 } else if (_existingPhotoPath!.startsWith('images/')) {
-                                                  return 'http://192.168.1.7/Capstone-MDRRMO/${_existingPhotoPath!}';
+                                                  return 'http://192.168.1.10/Capstone-MDRRMO/${_existingPhotoPath!}';
                                                 } else {
-                                                  return 'http://192.168.1.7/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
+                                                  return 'http://192.168.1.10/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
                                                 }
                                               })(),
                                               width: 180,
@@ -1038,14 +1218,9 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                 },
               );
               controller.addJavaScriptHandler(
-                handlerName: 'onWarningIconClick',
-                callback: (args) async {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HazardMapScreen(),
-                    ),
-                  );
+                handlerName: 'onOpenLocationSettings',
+                callback: (_) async {
+                  await Geolocator.openLocationSettings();
                 },
               );
             },
@@ -1054,7 +1229,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                 _isWebViewLoading = true;
               });
             },
-            onLoadStop: (controller, url) {
+            onLoadStop: (controller, url) async {
               if (_cleanupCompleter != null &&
                   !_cleanupCompleter!.isCompleted &&
                   url.toString() == "about:blank") {
@@ -1064,6 +1239,45 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
               setState(() {
                 _isWebViewLoading = false;
               });
+
+              // Inject your updated JS function after the page finishes loading
+              await controller.evaluateJavascript(source: '''
+                console.log("🟢 JS injected from Dart - v1.4");
+
+                window.resolveBarangayViaHiddenLocate = function () {
+                    return new Promise((resolve) => {
+                        if (!navigator.geolocation) {
+                            console.log("Returning from JS: NO_GPS");
+                            return resolve("NO_GPS");
+                        }
+
+                        navigator.geolocation.getCurrentPosition(
+                            function (position) {
+                                const lat = position.coords.latitude;
+                                const lng = position.coords.longitude;
+
+                                const barangay = getBarangayForLatLng(lat, lng);
+                                if (!barangay) {
+                                    console.log("Returning from JS: OUTSIDE_BOUNDARY");
+                                    resolve("OUTSIDE_BOUNDARY");
+                                } else {
+                                    console.log("Returning from JS:", barangay);
+                                    resolve(barangay);
+                                }
+                            },
+                            function (error) {
+                                console.log("Returning from JS: NO_GPS (error)", error);
+                                resolve("NO_GPS");
+                            },
+                            {
+                                enableHighAccuracy: true,
+                                maximumAge: 0,
+                                timeout: 10000
+                            }
+                        );
+                    });
+                };
+              ''');
             },
           ),
           if (_isWebViewLoading)

@@ -531,7 +531,10 @@
             div.onclick = function () {
                 searchInput.value = b.name;
                 suggestionsBox.style.display = 'none';
-                map.fitBounds(b.layer.getBounds ? b.layer.getBounds() : b.layer.getLatLng().toBounds(100));
+
+                const bounds = b.layer.getBounds ? b.layer.getBounds() : b.layer.getLatLng().toBounds(100);
+                map.fitBounds(bounds, { maxZoom: 17 });                
+    
                 b.layer.openPopup && b.layer.openPopup();
                 b.layer.setStyle && b.layer.setStyle({ color: '#232A67', weight: 3 });
                 // --- Add red pinpoint marker ---
@@ -586,12 +589,38 @@
                 var point = turf.point([lng, lat]);
                 var polygon = layer.feature;
                 if (turf.booleanPointInPolygon(point, polygon)) {
-                    foundBarangay = layer.feature.properties.Barangay || "Unknown";
+                    foundBarangay = layer.feature.properties.Barangay || null;
                 }
             }
         });
         return foundBarangay;
     }
+
+    // Listen for geolocation errors
+    map.on('locationerror', function (e) {
+        // Optional: check if geolocateRequestActive is true
+        if (window.geolocateRequestActive) {
+            window.geolocateRequestActive = false;
+
+            Swal.fire({
+                toast: true,
+                position: 'top',
+                icon: 'warning',
+                title: "Location is turned off. Please enable GPS.",
+                showConfirmButton: true,
+                confirmButtonText: 'Open Settings',
+                showCancelButton: true,
+                cancelButtonText: 'Cancel',
+                customClass: { popup: 'swal2-geo-tooltip' }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    if (window.flutter_inappwebview) {
+                        window.flutter_inappwebview.callHandler('onOpenLocationSettings');
+                    }
+                }
+            });
+        }
+    });
 
     // Listen for location found (from the location control)
     map.on('locationfound', function(e) {
@@ -659,7 +688,7 @@
     window.resolveBarangayViaHiddenLocate = function () {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
-                return reject("Geolocation is not supported by your browser.");
+                return resolve("NO_GPS");
             }
 
             navigator.geolocation.getCurrentPosition(
@@ -667,11 +696,18 @@
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
 
-                    const barangay = getBarangayForLatLng(lat, lng) || "Unknown Barangay";
-                    resolve(barangay);
+                    const barangay = getBarangayForLatLng(lat, lng);
+                    if (!barangay) {
+                        console.log("Location is outside Padre Garcia boundary.");
+                        resolve("OUTSIDE_BOUNDARY");
+                    } else {
+                        console.log("Barangay found:", barangay);
+                        resolve(barangay);
+                    }
                 },
                 function (error) {
-                    reject("Geolocation error: " + error.message);
+                    console.log("Geolocation error:", error);
+                    resolve("NO_GPS");
                 },
                 {
                     enableHighAccuracy: true,
@@ -778,7 +814,7 @@
         const reportIds = localReports.map(report => report.id);
     
         // 3. Fetch their current status from the DB
-        fetch(`http://192.168.1.7/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
+        fetch(`http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
             .then(response => response.json())
             .then(dbReports => {
                 // Log current local reports for debugging
