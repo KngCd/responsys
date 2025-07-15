@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
+import 'package:flutter/gestures.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:image_picker/image_picker.dart';
@@ -16,7 +17,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 import 'main.dart';
-import 'hazard_map.dart';
+// import 'hazard_map.dart';
 // import 'widgets/navbar.dart';
 
 class QgisMapScreen extends StatefulWidget {
@@ -633,6 +634,126 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     );
   }
 
+  static const String termsText = '''
+Effective Date: TBA
+
+By submitting a report through this application, you agree to the following terms:
+
+1. Purpose  
+This app is intended for citizens of Padre Garcia to report incidents and hazards for use by the Municipal Disaster Risk Reduction and Management Office (MDRRMO).
+
+2. Use of the App  
+• You may only submit reports related to real incidents within Padre Garcia.  
+• False, misleading, or malicious submissions are prohibited.  
+• The app limits report submissions to users physically located inside Padre Garcia.
+
+3. Content Submitted  
+• Reports must include a description and an image.  
+• The image must contain a visible timestamp and GPS location watermark.  
+• By submitting, you give the MDRRMO permission to use the report data for disaster monitoring and public safety.
+
+4. Local Storage  
+• Your submitted reports are saved on your device so you can update them later.  
+• Reports are also stored in the municipal database.
+
+5. Updates to Reports  
+• You can only update reports from the device where they were originally submitted.
+
+6. Limitation of Liability  
+• The LGU of Padre Garcia is not responsible for how submitted data is interpreted or used beyond its intended purpose.
+
+7. Changes to These Terms  
+• Terms may change without prior notice. Continued use of the app means you accept the current terms.
+''';
+
+  static const String privacyText = '''
+Effective Date: TBA
+
+This privacy policy explains how your information is used when submitting reports through this app.
+
+1. Data Collected  
+When you submit a report, we collect:  
+• The incident description  
+• The image you provide (with embedded date, time, and location)  
+• Your device's current location (latitude and longitude)  
+• The barangay where the incident occurred  
+• The date and time of submission
+
+2. How We Use the Data  
+• To log, verify, and respond to incidents in Padre Garcia  
+• To display current hazard information to users and responders
+
+3. Local Storage  
+• Reports you submit are stored locally on your device so that you can view or update them.  
+• No user account or personal identification is required or collected.
+
+4. Security Measures  
+• The app and server apply data validation, file checks, and location boundary enforcement to ensure submitted data is safe and accurate.  
+• No personal information (e.g., name, contact number) is collected or stored.
+
+5. Data Sharing  
+• Submitted reports are only accessible to authorized personnel of the LGU Padre Garcia.  
+• No data is sold or shared with third parties.
+
+6. Policy Updates  
+• This policy may be updated as the app evolves. Continued use of the app confirms your agreement with the current policy.
+''';
+
+  void _showCustomPolicyDialog({
+    required BuildContext context,
+    required String title,
+    required IconData icon,
+    required String content,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+        title: Row(
+          children: [
+            Icon(icon, color: const Color(0xFF232A67)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                style: GoogleFonts.montserrat(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF232A67),
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 400, maxWidth: 600),
+          child: Scrollbar(
+            radius: const Radius.circular(4),
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                content,
+                style: GoogleFonts.montserrat(fontSize: 13, height: 1.5),
+                textAlign: TextAlign.left,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF232A67),
+            ),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Show incident form sheet with location and barangay
   void _showIncidentFormSheet({
     required double latitude,
@@ -1033,6 +1154,53 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12.0),
+                      child: Text.rich(
+                        TextSpan(
+                          text: 'By submitting this report, you are agreeing to our ',
+                          style: GoogleFonts.montserrat(
+                            fontSize: 12,
+                            color: Colors.black87,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: 'Terms and Conditions',
+                              style: const TextStyle(
+                                color: Color(0xFF232A67),
+                                decoration: TextDecoration.underline,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () => _showCustomPolicyDialog(
+                                      context: context,
+                                      title: 'Terms and Conditions',
+                                      icon: Icons.gavel_outlined,
+                                      content: termsText,
+                                    ),
+                            ),
+                            const TextSpan(text: ' and '),
+                            TextSpan(
+                              text: 'Privacy Policy',
+                              style: const TextStyle(
+                                color: Color(0xFF232A67),
+                                decoration: TextDecoration.underline,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () => _showCustomPolicyDialog(
+                                      context: context,
+                                      title: 'Privacy Policy',
+                                      icon: Icons.privacy_tip_outlined,
+                                      content: privacyText,
+                                    ),
+                            ),
+                            const TextSpan(text: '.'),
+                          ],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    )
                   ],
                 ),
               ),
