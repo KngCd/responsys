@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 import 'main.dart';
+import 'utils/server_config.dart';
 // import 'hazard_map.dart';
 // import 'widgets/navbar.dart';
 
@@ -30,6 +31,9 @@ class QgisMapScreen extends StatefulWidget {
 
 class _QgisMapScreenState extends State<QgisMapScreen> {
   // final server = InAppLocalhostServer(documentRoot: 'assets/qgis_map');
+  String? _backendIP;
+  bool _isIpConfigVisible = false;
+  final TextEditingController _ipController = TextEditingController();
   bool _isWebViewLoading = true; 
   InAppWebViewController? _webViewController;
   final Completer<InAppWebViewController> _controllerCompleter = Completer<InAppWebViewController>();
@@ -185,23 +189,62 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     }
   }
 
+  Future<bool> _requestCameraPermission() async {
+    PermissionStatus status = await Permission.camera.status;
+    if (status.isGranted) return true;
+  
+    status = await Permission.camera.request();
+    if (status.isGranted) return true;
+  
+    // If denied or permanently denied, show custom dialog to open settings
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Camera Permission Required'),
+        content: const Text(
+          'Camera access is required to take a photo. Please enable camera permission in your device settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await openAppSettings();
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Open Settings'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+  
   Future<void> _openCamera(Function(File?) onImagePicked) async {
+    final allowed = await _requestCameraPermission();
+    if (!allowed) {
+      onImagePicked(null);
+      return;
+    }
+  
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 80,
     );
-
+  
     if (pickedFile == null) {
       onImagePicked(null); // User cancelled
       return;
     }
-
+  
     final file = File(pickedFile.path);
     final barangay = await _getBarangayFromLeaflet();
-
-    if (!mounted) return; // Safety check
-
+  
+    if (!mounted) return;
+  
     if (barangay == 'NO_GPS') {
       await showDialog(
         context: context,
@@ -225,15 +268,15 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           ],
         ),
       );
-
+  
       if (mounted) {
         Navigator.of(context).pop(); // Close form sheet
       }
-
+  
       onImagePicked(null);
       return;
     }
-
+  
     if (barangay == 'OUTSIDE_BOUNDARY') {
       await showDialog(
         context: context,
@@ -250,15 +293,15 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           ],
         ),
       );
-
+  
       if (mounted) {
         Navigator.of(context).pop(); // Close form sheet
       }
-
+  
       onImagePicked(null);
       return;
     }
-
+  
     // Valid barangay
     final watermarkedFile = await addWatermarkToImage(file, barangay);
     onImagePicked(watermarkedFile);
@@ -276,8 +319,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     required InAppWebViewController? webViewController,
   }) async {
     final String timeNow = TimeOfDay.now().format(context);
-    final uri = Uri.parse(
-      'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/update_report.php',
+    final uri = await IPConfig.getUri(
+      'php/reportings/citizens_reports/update_report.php',
     );
     final request = http.MultipartRequest('POST', uri)
       ..fields['report_id'] = reportId.toString()
@@ -362,9 +405,10 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   Future<void> fetchAndSyncReportsFromServer() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final response = await http.get(
-        Uri.parse('http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php'),
+      final checkUri = await IPConfig.getUri(
+        'php/reportings/citizens_reports/check_reports_status.php',
       );
+      final response = await http.get(checkUri);
       if (response.statusCode == 200) {
         final List reports = jsonDecode(response.body);
         // Only keep active and not deleted in localStorage, but keep all for reference
@@ -379,7 +423,7 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             position: 'top',
             icon: 'error',
             title: "Could not connect to the server",
-            text: "${e.runtimeType}: ${e.toString().replaceAll('"', "'").replaceAll('\n', ' ')}",
+            // text: "${e.runtimeType}: ${e.toString().replaceAll('"', "'").replaceAll('\n', ' ')}",
             showConfirmButton: false,
             timer: 1500,
             timerProgressBar: true,
@@ -419,6 +463,16 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
     super.initState();
     _requestLocationPermission();
     fetchAndSyncReportsFromServer();
+
+    IPConfig.getIP().then((ip) {
+      if (mounted) {
+        setState(() {
+          _backendIP = ip;
+          _ipController.text = ip;
+        });
+      }
+    });
+
     // Increase interval to 10 seconds
     // _syncTimer = Timer.periodic(Duration(seconds: 10), (timer) {
     //   fetchAndSyncReportsFromServer();
@@ -439,34 +493,47 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
   }
   
   Future<void> _ensureLocationServiceEnabled() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    while (!serviceEnabled && mounted) {
-      if (!mounted) return;
+    while (mounted) {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (serviceEnabled) break;
+
       final result = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (dialogCtx) => AlertDialog(
-          title: const Text('Location Required'),
-          content: const Text('Please enable location services (GPS) in your device settings to use this app.'),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Geolocator.openLocationSettings();
-                Navigator.pop(dialogCtx, true);
-              },
-              child: const Text('Open Settings'),
+        builder: (dialogCtx) {
+          return AlertDialog(
+            title: const Text('Location Required'),
+            content: const Text(
+              'Please enable location services (GPS) in your device settings to use this app.',
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogCtx, false);
-              },
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  await Geolocator.openLocationSettings();
+
+                  // Keep checking until GPS is enabled or user closes dialog
+                  while (mounted) {
+                    bool enabled = await Geolocator.isLocationServiceEnabled();
+                    if (enabled) {
+                      Navigator.of(dialogCtx).pop(true); // Close dialog
+                      break;
+                    }
+                    await Future.delayed(const Duration(seconds: 1));
+                  }
+                },
+                child: const Text('Open Settings'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(false),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
       );
-      if (result != true) break; // User cancelled
-      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+      // User canceled or GPS still not enabled
+      if (result != true) break;
     }
   }
 
@@ -535,8 +602,8 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       }
     
       try {
-        final uri = Uri.parse(
-          'http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/save_report.php',
+        final uri = await IPConfig.getUri(
+          'php/reportings/citizens_reports/save_report.php',
         );
         final request = http.MultipartRequest('POST', uri)
           ..fields['latitude'] = latitude.toString()
@@ -921,36 +988,41 @@ When you submit a report, we collect:
                                         ],
                                       )
                                     : (_existingPhotoPath ?? '').isNotEmpty
-                                        ? ClipRRect(
-                                            key: ValueKey('network'),
-                                            borderRadius: BorderRadius.circular(12),
-                                            child: Image.network(
-                                              (() {
-                                                if (_existingPhotoPath!.startsWith('http')) {
-                                                  return _existingPhotoPath!;
-                                                } else if (_existingPhotoPath!.startsWith('images/')) {
-                                                  return 'http://192.168.1.10/Capstone-MDRRMO/${_existingPhotoPath!}';
-                                                } else {
-                                                  return 'http://192.168.1.10/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
-                                                }
-                                              })(),
-                                              width: 180,
-                                              height: 180,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (context, error, stackTrace) =>
-                                                  const Icon(
-                                                    Icons.broken_image,
-                                                    size: 40,
-                                                    color: Colors.red,
-                                                  ),
-                                            ),
-                                          )
-                                        : const Icon(
-                                            key: ValueKey('icon'),
-                                            Icons.camera_alt,
-                                            size: 40,
-                                            color: Colors.black54,
-                                          ),
+                                      ? ClipRRect(
+                                          key: const ValueKey('network'),
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Image.network(
+                                            (() {
+                                              if (_existingPhotoPath!.startsWith(
+                                                'http',
+                                              )) {
+                                                return _existingPhotoPath!;
+                                              } else if (_existingPhotoPath!
+                                                  .startsWith('images/')) {
+                                                return 'http://${_backendIP ?? '192.168.1.10'}/Capstone-MDRRMO/${_existingPhotoPath!}';
+                                              } else {
+                                                return 'http://${_backendIP ?? '192.168.1.10'}/Capstone-MDRRMO/images/report_pictures/${_existingPhotoPath!}';
+                                              }
+                                      })(),
+                                      width: 180,
+                                      height: 180,
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                              const Icon(
+                                                Icons.broken_image,
+                                                size: 40,
+                                                color: Colors.red,
+                                              ),
+                                    ),
+                                  )
+                                : const Icon(
+                                    key: ValueKey('icon'),
+                                    Icons.camera_alt,
+                                    size: 40,
+                                    color: Colors.black54,
+                                  ),
+
                           ),
                           const SizedBox(height: 8),
                           ElevatedButton.icon(
@@ -1245,10 +1317,28 @@ When you submit a report, we collect:
           },
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _webViewController?.reload(),
-        tooltip: "Reload Map",
-        child: const Icon(Icons.refresh),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            heroTag: "reload",
+            onPressed: () => _webViewController?.reload(),
+            tooltip: "Reload Map",
+            child: const Icon(Icons.refresh),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: "ipConfig",
+            onPressed: () {
+              setState(() {
+                _isIpConfigVisible = !_isIpConfigVisible;
+              });
+            },
+            tooltip: "Configure IP",
+            backgroundColor: Colors.deepOrange,
+            child: const Icon(Icons.settings_ethernet),
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -1408,6 +1498,17 @@ When you submit a report, we collect:
                 _isWebViewLoading = false;
               });
 
+                final savedIp = await IPConfig.getIP(); // Fetch saved IP
+
+              // 🔥 Inject IP into JS context
+              await controller.evaluateJavascript(
+                source:
+                    '''
+                  window.backendIP = "$savedIp";
+                  console.log("✅ window.backendIP set to $savedIp");
+                ''',
+              );
+
               // Inject your updated JS function after the page finishes loading
               await controller.evaluateJavascript(source: '''
                 console.log("🟢 JS injected from Dart - v1.4");
@@ -1446,6 +1547,56 @@ When you submit a report, we collect:
                     });
                 };
               ''');
+
+              await controller.evaluateJavascript(
+                source: '''
+                  console.log("🔁 Starting incident map connectivity polling");
+
+                  if (window.incidentConnectionInterval) clearInterval(window.incidentConnectionInterval);
+
+                  let wasConnected = null;
+
+                  window.incidentConnectionInterval = setInterval(() => {
+                    const ip = window.backendIP || '192.168.1.10';
+
+                    fetch(`http://\${ip}/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php`, {
+                      method: 'HEAD'
+                    })
+                    .then(response => {
+                      if (!response.ok) throw new Error("Server error");
+
+                      if (wasConnected !== true) {
+                        wasConnected = true;
+                        Swal.fire({
+                          toast: true,
+                          position: 'top',
+                          icon: 'success',
+                          title: "Connected to server",
+                          showConfirmButton: false,
+                          timer: 1200,
+                          timerProgressBar: true,
+                          customClass: { popup: 'swal2-geo-tooltip' }
+                        });
+                      }
+                    })
+                    .catch(err => {
+                      if (wasConnected !== false) {
+                        wasConnected = false;
+                        Swal.fire({
+                          toast: true,
+                          position: 'top',
+                          icon: 'error',
+                          title: "Could not connect to the server",
+                          showConfirmButton: false,
+                          timer: 1500,
+                          timerProgressBar: true,
+                          customClass: { popup: 'swal2-geo-tooltip' }
+                        });
+                      }
+                    });
+                  }, 5000);
+                ''',
+              );
             },
           ),
           if (_isWebViewLoading)
@@ -1454,6 +1605,69 @@ When you submit a report, we collect:
                 color: Colors.white, // Just a blank white overlay
               ),
           ),
+          if (_isIpConfigVisible)
+            Positioned(
+              top: 20,
+              right: 16,
+              left: 16,
+              child: Material(
+                elevation: 6,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: _ipController,
+                        decoration: InputDecoration(
+                          labelText: "Backend IP",
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.save),
+                            onPressed: () async {
+                              final newIp = _ipController.text.trim();
+                              if (newIp.isNotEmpty) {
+                                await IPConfig.setIP(newIp);
+                                final updatedIp = await IPConfig.getIP();
+
+                                setState(() {
+                                  _backendIP = updatedIp;
+                                  _isIpConfigVisible = false;
+                                });
+
+                                // Inject updated IP into WebView context
+                                await _webViewController?.evaluateJavascript(
+                                  source:
+                                      'window.backendIP = "$updatedIp"; console.log("Updated window.backendIP to: $updatedIp");',
+                                );
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("IP updated to $updatedIp"),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          setState(() => _isIpConfigVisible = false);
+                        },
+                        icon: const Icon(Icons.close),
+                        label: const Text("Cancel"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (_isEditingLocation)
             Positioned(
               top: 0,

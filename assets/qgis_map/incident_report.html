@@ -801,6 +801,7 @@
     };
 
     function loadUserReports() {
+        const ip = window.backendIP || '192.168.1.10'; // fallback, just in case
         // 1. Get user's reports from localStorage
         let localReports = JSON.parse(localStorage.getItem("citizenReports") || "[]");  
 
@@ -814,7 +815,7 @@
         const reportIds = localReports.map(report => report.id);
     
         // 3. Fetch their current status from the DB
-        fetch(`http://192.168.1.10/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
+        fetch(`http://${ip}/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php?ids=${reportIds.join(',')}`)
             .then(response => response.json())
             .then(dbReports => {
                 // Log current local reports for debugging

@@ -489,7 +489,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ),
                     blendMode: BlendMode.srcIn,
                     child: Text(
-                      "Incidents located in Padre Garcia can be reported\nto the MDRRMO using this app",
+                      "Reports are collected in real-time by the MDRRMO\n"
+                      "enabling faster response to local emergencies",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 17,
@@ -596,7 +597,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ),
                     blendMode: BlendMode.srcIn,
                     child: Text(
-                      "Incidents located in Padre Garcia can be reported\nto the MDRRMO using this app",
+                      "Receive timely updates and important alerts\n"
+                      "to help you stay safe during emergencies",                      
                       textAlign: TextAlign.center,
                       style: GoogleFonts.montserrat(
                         fontSize: 17,
