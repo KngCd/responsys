@@ -630,8 +630,11 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
             'date': data['date'],
             'time': data['time'],
           });
-          await sendLocalReportsToWebView();
-          await fetchAndSyncReportsFromServer();
+          // await sendLocalReportsToWebView();
+          // await fetchAndSyncReportsFromServer();
+
+          await Future.delayed(Duration(milliseconds: 600)); // Let JS catch up
+
           await _webViewController?.evaluateJavascript(
             source: """
               window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
