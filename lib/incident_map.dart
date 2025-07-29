@@ -18,6 +18,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'main.dart';
 import 'utils/server_config.dart';
+import 'utils/connection_state.dart';
 // import 'hazard_map.dart';
 // import 'widgets/navbar.dart';
 
@@ -359,20 +360,39 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
       });
       await sendLocalReportsToWebView();
       await fetchAndSyncReportsFromServer();
+
+      await Future.delayed(Duration(milliseconds: 800));
+
       webViewController?.evaluateJavascript(
         source: """
-          window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
-          window.setFlutterReports && window.setFlutterReports();
-          Swal.fire({
-            toast: true,
-            position: 'top',
-            icon: 'success',
-            title: "Report updated successfully!",
-            showConfirmButton: false,
-            timer: 1500,
-            timerProgressBar: true,
-            customClass: { popup: 'swal2-geo-tooltip' }
-        });
+          try {
+            // Force clear all markers
+            for (let [reportId, marker] of window.activeMarkers) {
+              map.removeLayer(marker);
+            }
+            window.activeMarkers.clear();
+            
+            // Save to localStorage  
+            window.saveUserReportToLocalStorage(${jsonEncode(data)});
+            
+            // Use BOTH update methods
+            window.setFlutterReports && window.setFlutterReports();
+            loadUserReports();
+            
+            Swal.fire({
+                toast: true,
+                position: 'top',
+                icon: 'success',
+                title: "Report updated successfully!",
+                showConfirmButton: false,
+                timer: 1500,
+                timerProgressBar: true,
+                customClass: { popup: 'swal2-geo-tooltip' }
+            });
+          } catch(e) {
+            console.error("Error updating markers:", e);
+            loadUserReports(); // Direct fallback call
+          }
         """,
       );
       if (mounted) {
@@ -633,22 +653,38 @@ class _QgisMapScreenState extends State<QgisMapScreen> {
           // await sendLocalReportsToWebView();
           // await fetchAndSyncReportsFromServer();
 
-          await Future.delayed(Duration(milliseconds: 600)); // Let JS catch up
+          await Future.delayed(Duration(milliseconds: 800)); // Let JS catch up
 
           await _webViewController?.evaluateJavascript(
             source: """
-              window.saveUserReportToLocalStorage && window.saveUserReportToLocalStorage(${jsonEncode(data)});
-              window.setFlutterReports && window.setFlutterReports();
-              Swal.fire({
-                  toast: true,
-                  position: 'top',
-                  icon: 'success',
-                  title: "Report added successfully!",
-                  showConfirmButton: false,
-                  timer: 1500,
-                  timerProgressBar: true,
-                  customClass: { popup: 'swal2-geo-tooltip' }
-              });
+              try{
+                // Force clear existing markers
+                for (let [reportId, marker] of window.activeMarkers) {
+                  map.removeLayer(marker);
+                }
+                window.activeMarkers.clear();
+                
+                // Save to localStorage
+                window.saveUserReportToLocalStorage(${jsonEncode(data)});
+                
+                // Use BOTH methods to ensure markers update
+                window.setFlutterReports && window.setFlutterReports();
+                loadUserReports();
+
+                Swal.fire({
+                    toast: true,
+                    position: 'top',
+                    icon: 'success',
+                    title: "Report added successfully!",
+                    showConfirmButton: false,
+                    timer: 1500,
+                    timerProgressBar: true,
+                    customClass: { popup: 'swal2-geo-tooltip' }
+                });
+              } catch(e) {
+                console.error("Error updating markers:", e);
+                loadUserReports(); // Direct fallback call
+              }
             """,
           );
         } else {
@@ -1307,19 +1343,7 @@ When you submit a report, we collect:
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Incident Map"),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (context) => const OnboardingScreen()),
-              (route) => false,
-            );
-          },
-        ),
-      ),
+      appBar: null,
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
@@ -1343,371 +1367,409 @@ When you submit a report, we collect:
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          InAppWebView(
-            onConsoleMessage: (controller, consoleMessage) {
-              debugPrint("JS LOG: ${consoleMessage.message}");
-            },
-            initialUrlRequest: URLRequest(
-              url: WebUri("http://localhost:8080/incident_report.html"),
-            ),
-            initialSettings: InAppWebViewSettings(
-              javaScriptEnabled: true,
-              useShouldOverrideUrlLoading: true,
-            ),
-            onGeolocationPermissionsShowPrompt: (controller, origin) async {
-              return GeolocationPermissionShowPromptResponse(
-                origin: origin,
-                allow: true,
-                retain: true,
-              );
-            },
-            onWebViewCreated: (controller) {
-              _webViewController = controller;
+      body: SafeArea(
+        child: Stack(
+          children: [
+            InAppWebView(
+              onConsoleMessage: (controller, consoleMessage) {
+                debugPrint("JS LOG: ${consoleMessage.message}");
+              },
+              initialUrlRequest: URLRequest(
+                url: WebUri("http://localhost:8080/incident_report.html"),
+              ),
+              initialSettings: InAppWebViewSettings(
+                javaScriptEnabled: true,
+                useShouldOverrideUrlLoading: true,
+              ),
+              onGeolocationPermissionsShowPrompt: (controller, origin) async {
+                return GeolocationPermissionShowPromptResponse(
+                  origin: origin,
+                  allow: true,
+                  retain: true,
+                );
+              },
+              onWebViewCreated: (controller) {
+                _webViewController = controller;
 
-              if (!_controllerCompleter.isCompleted) {
-                _controllerCompleter.complete(controller);
-              }
+                if (!_controllerCompleter.isCompleted) {
+                  _controllerCompleter.complete(controller);
+                }
 
-              // Force reload if coming from navbar navigation
-              if (QgisMapScreen.forceReloadOnNextBuild) {
-                QgisMapScreen.forceReloadOnNextBuild = false;
-                controller.reload();
-              }
+                  controller.addJavaScriptHandler(
+                  handlerName: 'onConnectionChanged',
+                  callback: (args) {
+                    final bool isConnected = args[0];
+                    ServerConnectionState.setConnected(isConnected);
+                  },
+                );
 
-              controller.addJavaScriptHandler(
-                handlerName: 'onMapClick',
-                callback: (args) async {
-                  final double lat = args[0];
-                  final double lng = args[1];
-                  final String barangay = args.length > 2 ? args[2] : '';
-                  await Future.delayed(const Duration(milliseconds: 350));
-                  if (_editingReportId != null) {
-                    // Use retained fields for the form
-                    _descriptionController.text = _editingDescription ?? '';
-                    _showIncidentFormSheet(
-                      latitude: lat,
-                      longitude: lng,
-                      barangay: barangay,
-                      editingReportId: _editingReportId,
-                      existingPhotoPath: _existingPhotoPath,
-                      originalBarangay: _originalBarangay,
+                // Force reload if coming from navbar navigation
+                if (QgisMapScreen.forceReloadOnNextBuild) {
+                  QgisMapScreen.forceReloadOnNextBuild = false;
+                  controller.reload();
+                }
+
+                controller.addJavaScriptHandler(
+                  handlerName: 'onMapClick',
+                  callback: (args) async {
+                    final double lat = args[0];
+                    final double lng = args[1];
+                    final String barangay = args.length > 2 ? args[2] : '';
+                    await Future.delayed(const Duration(milliseconds: 350));
+                    if (_editingReportId != null) {
+                      // Use retained fields for the form
+                      _descriptionController.text = _editingDescription ?? '';
+                      _showIncidentFormSheet(
+                        latitude: lat,
+                        longitude: lng,
+                        barangay: barangay,
+                        editingReportId: _editingReportId,
+                        existingPhotoPath: _existingPhotoPath,
+                        originalBarangay: _originalBarangay,
+                      );
+                      // setState(() {
+                      //   _isEditingLocation = false; // Hide banner after picking location
+                      //   // Do NOT clear editing fields here, only after submit/cancel
+                      // });
+                    } else {
+                      _showIncidentFormSheet(
+                        latitude: lat,
+                        longitude: lng,
+                        barangay: barangay,
+                      );
+                    }
+                  },
+                );
+                controller.addJavaScriptHandler(
+                  handlerName: 'onEditReport',
+                  callback: (args) async {
+                    final int reportId = args[0];
+                    final double lat = args[1];
+                    final double lng = args[2];
+                    final String barangay = args[3];
+                    final String description = args[4];
+                    final String existingPhotoPath = args[5];
+                    final String originalBarangay = args[6];
+        
+                    final updateLocation = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Update Location?'),
+                        content: const Text('Do you want to update the location for this report?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            child: const Text('No'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(true),
+                            child: const Text('Yes'),
+                          ),
+                        ],
+                      ),
                     );
-                    // setState(() {
-                    //   _isEditingLocation = false; // Hide banner after picking location
-                    //   // Do NOT clear editing fields here, only after submit/cancel
-                    // });
-                  } else {
-                    _showIncidentFormSheet(
-                      latitude: lat,
-                      longitude: lng,
-                      barangay: barangay,
-                    );
-                  }
-                },
-              );
-              controller.addJavaScriptHandler(
-                handlerName: 'onEditReport',
-                callback: (args) async {
-                  final int reportId = args[0];
-                  final double lat = args[1];
-                  final double lng = args[2];
-                  final String barangay = args[3];
-                  final String description = args[4];
-                  final String existingPhotoPath = args[5];
-                  final String originalBarangay = args[6];
-      
-                  final updateLocation = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Update Location?'),
-                      content: const Text('Do you want to update the location for this report?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          child: const Text('No'),
+        
+                    if (updateLocation == true) {
+                      _descriptionController.text = description;
+                      setState(() {
+                        _editingReportId = reportId;
+                        _existingPhotoPath = existingPhotoPath;
+                        _originalBarangay = originalBarangay;
+                        _editingDescription = description;
+                        _isEditingLocation = true; // Show banner
+                      });
+                      if (mounted) {
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Tap on the map to select the new location.',
+                            ),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                      // Wait for map click, then open form with new lat/lng
+                    } else {
+                      _descriptionController.text = description;
+                      _showIncidentFormSheet(
+                        latitude: lat,
+                        longitude: lng,
+                        barangay: barangay,
+                        editingReportId: reportId,
+                        existingPhotoPath: existingPhotoPath,
+                        originalBarangay: originalBarangay,
+                        onClosed: () {
+                          setState(() {
+                            _editingDescription = null;
+                            _isEditingLocation = false;
+                            _editingReportId = null;
+                            _existingPhotoPath = null;
+                            _originalBarangay = null;
+                          });
+                        },
+                      );
+                    }
+                  },
+                );
+                controller.addJavaScriptHandler(
+                  handlerName: 'onOpenLocationSettings',
+                  callback: (_) async {
+                    await Geolocator.openLocationSettings();
+                  },
+                );
+              },
+              onLoadStart: (controller, url) {
+                setState(() {
+                  _isWebViewLoading = true;
+                });
+              },
+              onLoadStop: (controller, url) async {
+                if (_cleanupCompleter != null &&
+                    !_cleanupCompleter!.isCompleted &&
+                    url.toString() == "about:blank") {
+                  _cleanupCompleter!.complete();
+                }
+
+                setState(() {
+                  _isWebViewLoading = false;
+                });
+
+                  final savedIp = await IPConfig.getIP(); // Fetch saved IP
+
+                // 🔥 Inject IP into JS context
+                await controller.evaluateJavascript(
+                  source:
+                      '''
+                    window.backendIP = "$savedIp";
+                    console.log("✅ window.backendIP set to $savedIp");
+                  ''',
+                );
+
+                // Inject your updated JS function after the page finishes loading
+                await controller.evaluateJavascript(source: '''
+                  console.log("🟢 JS injected from Dart - v1.4");
+
+                  window.resolveBarangayViaHiddenLocate = function () {
+                      return new Promise((resolve) => {
+                          if (!navigator.geolocation) {
+                              console.log("Returning from JS: NO_GPS");
+                              return resolve("NO_GPS");
+                          }
+
+                          navigator.geolocation.getCurrentPosition(
+                              function (position) {
+                                  const lat = position.coords.latitude;
+                                  const lng = position.coords.longitude;
+
+                                  const barangay = getBarangayForLatLng(lat, lng);
+                                  if (!barangay) {
+                                      console.log("Returning from JS: OUTSIDE_BOUNDARY");
+                                      resolve("OUTSIDE_BOUNDARY");
+                                  } else {
+                                      console.log("Returning from JS:", barangay);
+                                      resolve(barangay);
+                                  }
+                              },
+                              function (error) {
+                                  console.log("Returning from JS: NO_GPS (error)", error);
+                                  resolve("NO_GPS");
+                              },
+                              {
+                                  enableHighAccuracy: true,
+                                  maximumAge: 0,
+                                  timeout: 10000
+                              }
+                          );
+                      });
+                  };
+                ''');
+
+                // Get current connection state from Flutter
+                final isAlreadyConnected = ServerConnectionState.isConnected;
+
+                await controller.evaluateJavascript(
+                  source: '''
+                    console.log("🔁 Starting incident map connectivity polling");
+
+                    if (window.incidentConnectionInterval) clearInterval(window.incidentConnectionInterval);
+
+                    // Initialize with Flutter's connection state
+                    let wasConnected = ${isAlreadyConnected ? 'true' : 'null'};
+
+                    // If already connected, load content IMMEDIATELY 
+                    if ($isAlreadyConnected) {
+                      console.log("✅ Already connected - IMMEDIATELY loading reports");
+                      loadUserReports(); // Load reports right away!
+                    }
+
+                    window.incidentConnectionInterval = setInterval(() => {
+                      const ip = window.backendIP || '192.168.1.10';
+
+                      fetch(`http://\${ip}/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php`, {
+                        method: 'HEAD'
+                      })
+                      .then(response => {
+                        if (!response.ok) throw new Error("Server error");
+
+                        if (wasConnected !== true) {
+                          wasConnected = true;
+                          
+                          // Notify Flutter about connection state
+                          if (window.flutter_inappwebview) {
+                            window.flutter_inappwebview.callHandler('onConnectionChanged', true);
+                          }
+                          
+                          // Only show success toast if we weren't already connected
+                          if (!$isAlreadyConnected) {
+                            Swal.fire({
+                              toast: true,
+                              position: 'top',
+                              icon: 'success',
+                              title: "Connected to server",
+                              showConfirmButton: false,
+                              timer: 1200,
+                              timerProgressBar: true,
+                              customClass: { popup: 'swal2-geo-tooltip' }
+                            });
+                          }
+
+                          // IMMEDIATE LOADING when connection is established
+                          loadUserReports();
+                        }
+                      })
+                      .catch(err => {
+                        if (wasConnected !== false) {
+                          wasConnected = false;
+                          
+                          // Notify Flutter about connection state
+                          if (window.flutter_inappwebview) {
+                            window.flutter_inappwebview.callHandler('onConnectionChanged', false);
+                          }
+                          
+                          Swal.fire({
+                            toast: true,
+                            position: 'top',
+                            icon: 'error',
+                            title: "Could not connect to the server",
+                            showConfirmButton: false,
+                            timer: 1500,
+                            timerProgressBar: true,
+                            customClass: { popup: 'swal2-geo-tooltip' }
+                          });
+                        }
+                      });
+                    }, 1000); // 1 second polling
+                  ''',
+                );
+              },
+            ),
+            if (_isWebViewLoading)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.white, // Just a blank white overlay
+                ),
+            ),
+            if (_isIpConfigVisible)
+              Positioned(
+                top: 20,
+                right: 16,
+                left: 16,
+                child: Material(
+                  elevation: 6,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: _ipController,
+                          decoration: InputDecoration(
+                            labelText: "Backend IP",
+                            border: const OutlineInputBorder(),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.save),
+                              onPressed: () async {
+                                final newIp = _ipController.text.trim();
+                                if (newIp.isNotEmpty) {
+                                  await IPConfig.setIP(newIp);
+                                  final updatedIp = await IPConfig.getIP();
+
+                                  setState(() {
+                                    _backendIP = updatedIp;
+                                    _isIpConfigVisible = false;
+                                  });
+
+                                  // Inject updated IP into WebView context
+                                  await _webViewController?.evaluateJavascript(
+                                    source:
+                                        'window.backendIP = "$updatedIp"; console.log("Updated window.backendIP to: $updatedIp");',
+                                  );
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text("IP updated to $updatedIp"),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
                         ),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('Yes'),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() => _isIpConfigVisible = false);
+                          },
+                          icon: const Icon(Icons.close),
+                          label: const Text("Cancel"),
                         ),
                       ],
                     ),
-                  );
-      
-                  if (updateLocation == true) {
-                    _descriptionController.text = description;
-                    setState(() {
-                      _editingReportId = reportId;
-                      _existingPhotoPath = existingPhotoPath;
-                      _originalBarangay = originalBarangay;
-                      _editingDescription = description;
-                      _isEditingLocation = true; // Show banner
-                    });
-                    if (mounted) {
-                      ScaffoldMessenger.of(this.context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Tap on the map to select the new location.',
-                          ),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                    // Wait for map click, then open form with new lat/lng
-                  } else {
-                    _descriptionController.text = description;
-                    _showIncidentFormSheet(
-                      latitude: lat,
-                      longitude: lng,
-                      barangay: barangay,
-                      editingReportId: reportId,
-                      existingPhotoPath: existingPhotoPath,
-                      originalBarangay: originalBarangay,
-                      onClosed: () {
-                        setState(() {
-                          _editingDescription = null;
-                          _isEditingLocation = false;
-                          _editingReportId = null;
-                          _existingPhotoPath = null;
-                          _originalBarangay = null;
-                        });
-                      },
-                    );
-                  }
-                },
-              );
-              controller.addJavaScriptHandler(
-                handlerName: 'onOpenLocationSettings',
-                callback: (_) async {
-                  await Geolocator.openLocationSettings();
-                },
-              );
-            },
-            onLoadStart: (controller, url) {
-              setState(() {
-                _isWebViewLoading = true;
-              });
-            },
-            onLoadStop: (controller, url) async {
-              if (_cleanupCompleter != null &&
-                  !_cleanupCompleter!.isCompleted &&
-                  url.toString() == "about:blank") {
-                _cleanupCompleter!.complete();
-              }
-
-              setState(() {
-                _isWebViewLoading = false;
-              });
-
-                final savedIp = await IPConfig.getIP(); // Fetch saved IP
-
-              // 🔥 Inject IP into JS context
-              await controller.evaluateJavascript(
-                source:
-                    '''
-                  window.backendIP = "$savedIp";
-                  console.log("✅ window.backendIP set to $savedIp");
-                ''',
-              );
-
-              // Inject your updated JS function after the page finishes loading
-              await controller.evaluateJavascript(source: '''
-                console.log("🟢 JS injected from Dart - v1.4");
-
-                window.resolveBarangayViaHiddenLocate = function () {
-                    return new Promise((resolve) => {
-                        if (!navigator.geolocation) {
-                            console.log("Returning from JS: NO_GPS");
-                            return resolve("NO_GPS");
-                        }
-
-                        navigator.geolocation.getCurrentPosition(
-                            function (position) {
-                                const lat = position.coords.latitude;
-                                const lng = position.coords.longitude;
-
-                                const barangay = getBarangayForLatLng(lat, lng);
-                                if (!barangay) {
-                                    console.log("Returning from JS: OUTSIDE_BOUNDARY");
-                                    resolve("OUTSIDE_BOUNDARY");
-                                } else {
-                                    console.log("Returning from JS:", barangay);
-                                    resolve(barangay);
-                                }
-                            },
-                            function (error) {
-                                console.log("Returning from JS: NO_GPS (error)", error);
-                                resolve("NO_GPS");
-                            },
-                            {
-                                enableHighAccuracy: true,
-                                maximumAge: 0,
-                                timeout: 10000
-                            }
-                        );
-                    });
-                };
-              ''');
-
-              await controller.evaluateJavascript(
-                source: '''
-                  console.log("🔁 Starting incident map connectivity polling");
-
-                  if (window.incidentConnectionInterval) clearInterval(window.incidentConnectionInterval);
-
-                  let wasConnected = null;
-
-                  window.incidentConnectionInterval = setInterval(() => {
-                    const ip = window.backendIP || '192.168.1.10';
-
-                    fetch(`http://\${ip}/Capstone-MDRRMO/php/reportings/citizens_reports/check_reports_status.php`, {
-                      method: 'HEAD'
-                    })
-                    .then(response => {
-                      if (!response.ok) throw new Error("Server error");
-
-                      if (wasConnected !== true) {
-                        wasConnected = true;
-                        Swal.fire({
-                          toast: true,
-                          position: 'top',
-                          icon: 'success',
-                          title: "Connected to server",
-                          showConfirmButton: false,
-                          timer: 1200,
-                          timerProgressBar: true,
-                          customClass: { popup: 'swal2-geo-tooltip' }
-                        });
-                      }
-                    })
-                    .catch(err => {
-                      if (wasConnected !== false) {
-                        wasConnected = false;
-                        Swal.fire({
-                          toast: true,
-                          position: 'top',
-                          icon: 'error',
-                          title: "Could not connect to the server",
-                          showConfirmButton: false,
-                          timer: 1500,
-                          timerProgressBar: true,
-                          customClass: { popup: 'swal2-geo-tooltip' }
-                        });
-                      }
-                    });
-                  }, 5000);
-                ''',
-              );
-            },
-          ),
-          if (_isWebViewLoading)
-            Positioned.fill(
-              child: Container(
-                color: Colors.white, // Just a blank white overlay
-              ),
-          ),
-          if (_isIpConfigVisible)
-            Positioned(
-              top: 20,
-              right: 16,
-              left: 16,
-              child: Material(
-                elevation: 6,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                ),
+              ),
+            if (_isEditingLocation)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  color: Colors.amber[700],
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
                     children: [
-                      TextField(
-                        controller: _ipController,
-                        decoration: InputDecoration(
-                          labelText: "Backend IP",
-                          border: const OutlineInputBorder(),
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.save),
-                            onPressed: () async {
-                              final newIp = _ipController.text.trim();
-                              if (newIp.isNotEmpty) {
-                                await IPConfig.setIP(newIp);
-                                final updatedIp = await IPConfig.getIP();
-
-                                setState(() {
-                                  _backendIP = updatedIp;
-                                  _isIpConfigVisible = false;
-                                });
-
-                                // Inject updated IP into WebView context
-                                await _webViewController?.evaluateJavascript(
-                                  source:
-                                      'window.backendIP = "$updatedIp"; console.log("Updated window.backendIP to: $updatedIp");',
-                                );
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text("IP updated to $updatedIp"),
-                                  ),
-                                );
-                              }
-                            },
+                      Expanded(
+                        child: Text(
+                          "You're currently editing the report location",
+                          style: GoogleFonts.montserrat(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
                           ),
                         ),
                       ),
-                      TextButton.icon(
+                      IconButton(
+                        icon: Icon(Icons.close, color: Colors.white),
                         onPressed: () {
-                          setState(() => _isIpConfigVisible = false);
+                          setState(() {
+                            _isEditingLocation = false;
+                            _editingReportId = null;
+                            _existingPhotoPath = null;
+                            _originalBarangay = null;
+                            _editingDescription = null;
+                          });
                         },
-                        icon: const Icon(Icons.close),
-                        label: const Text("Cancel"),
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
-          if (_isEditingLocation)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                color: Colors.amber[700],
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        "You're currently editing the report location",
-                        style: GoogleFonts.montserrat(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.close, color: Colors.white),
-                      onPressed: () {
-                        setState(() {
-                          _isEditingLocation = false;
-                          _editingReportId = null;
-                          _existingPhotoPath = null;
-                          _originalBarangay = null;
-                          _editingDescription = null;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
       // bottomNavigationBar: BottomNavBar(
       //   current: NavPage.incident,
